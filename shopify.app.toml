@@ -1,0 +1,34 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "75b2e0d74886b7d29c2cc6cec7d5f3fe"
+name = "diagram-app"
+application_url = "https://example.com"
+embedded = true
+
+[access_scopes]
+scopes = "read_products,write_products,read_files,write_files"
+
+[app_proxy]
+url = "https://example.com/proxy"
+subpath = "diagram"
+prefix = "apps"
+# Storefront URL: yourstore.myshopify.com/apps/diagram/<handle>
+# Forwarded to:   https://your-app.railway.app/proxy/diagram/<handle>
+
+[webhooks]
+api_version = "2026-07"
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/uninstalled"
+  topics = [ "app/uninstalled" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/scopes_update"
+  topics = [ "app/scopes_update" ]
+
+[auth]
+redirect_urls = [ "https://example.com/api/auth" ]
+
+[build]
+include_config_on_deploy = true
+automatically_update_urls_on_dev = true
