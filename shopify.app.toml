@@ -2,14 +2,14 @@
 
 client_id = "75b2e0d74886b7d29c2cc6cec7d5f3fe"
 name = "diagram-app"
-application_url = "https://example.com"
+application_url = "https://pacific-expression-production-13f6.up.railway.app"
 embedded = true
 
 [access_scopes]
 scopes = "read_products,write_products,read_files,write_files"
 
 [app_proxy]
-url = "https://example.com/proxy"
+url = "https://pacific-expression-production-13f6.up.railway.app/proxy"
 subpath = "diagram"
 prefix = "apps"
 # Storefront URL: yourstore.myshopify.com/apps/diagram/<handle>
@@ -27,7 +27,7 @@ api_version = "2026-07"
   topics = [ "app/scopes_update" ]
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+redirect_urls = [ "https://pacific-expression-production-13f6.up.railway.app/auth/callback" ]
 
 [build]
 include_config_on_deploy = true
