@@ -1,19 +1,19 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-client_id = "75b2e0d74886b7d29c2cc6cec7d5f3fe"
-name = "diagram-app"
+client_id = "49bcd574106969055f568d65f3ac5c27"
+name = "oldcoleman-parts-diagram-app"
 application_url = "https://pacific-expression-production-13f6.up.railway.app"
 embedded = true
 
-[access_scopes]
-scopes = "read_products,write_products,read_files,write_files"
+[build]
+automatically_update_urls_on_dev = true
 
 [app_proxy]
 url = "https://pacific-expression-production-13f6.up.railway.app/proxy"
 subpath = "diagram"
 prefix = "apps"
-# Storefront URL: yourstore.myshopify.com/apps/diagram/<handle>
-# Forwarded to:   https://your-app.railway.app/proxy/diagram/<handle>
+# Storefront URL: yourstore.myshopify.com/apps/diagram
+# Forwarded to:   https://pacific-expression-production-13f6.up.railway.app/proxy/diagram
 
 [webhooks]
 api_version = "2026-07"
@@ -26,8 +26,10 @@ api_version = "2026-07"
   uri = "/webhooks/app/scopes_update"
   topics = [ "app/scopes_update" ]
 
-[auth]
-redirect_urls = [ "https://pacific-expression-production-13f6.up.railway.app/auth/callback" ]
+[access_scopes]
+scopes = "read_products,write_products,read_files,write_files"
 
-[build]
-automatically_update_urls_on_dev = true
+[auth]
+redirect_urls = [
+  "https://pacific-expression-production-13f6.up.railway.app/auth/callback"
+]
