@@ -34,29 +34,37 @@ model Session {
 }
 
 model Category {
-  id        Int        @id @default(autoincrement())
+  id        Int               @id @default(autoincrement())
   name      String
   imageUrl  String?
   parentId  Int?
-  parent    Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
-  children  Category[] @relation("CategoryHierarchy")
-  diagrams  Diagram[]
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  parent    Category?         @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children  Category[]        @relation("CategoryHierarchy")
+  diagrams  DiagramCategory[]
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
 }
 
 model Diagram {
-  id          Int              @id @default(autoincrement())
+  id          Int               @id @default(autoincrement())
   title       String
-  handle      String           @unique
+  handle      String            @unique
   description String?
   imageUrl    String?
   fileUrl     String?
-  categoryId  Int?
-  category    Category?        @relation(fields: [categoryId], references: [id])
+  categories  DiagramCategory[]
   products    DiagramProduct[]
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+}
+
+model DiagramCategory {
+  diagramId  Int
+  categoryId Int
+  diagram    Diagram  @relation(fields: [diagramId], references: [id], onDelete: Cascade)
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([diagramId, categoryId])
 }
 
 model DiagramProduct {

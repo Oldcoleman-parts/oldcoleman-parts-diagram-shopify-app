@@ -71,13 +71,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const id = Number(formData.get("id"));
     const category = await db.category.findUnique({
       where: { id },
-      include: { _count: { select: { diagrams: true } } },
+      include: {
+        _count: { select: { diagrams: true, children: true } },
+      },
     });
     if (!category) return { errors: { general: "Category not found" } };
     if (category._count.diagrams > 0) {
       return {
         errors: {
           general: `Cannot delete "${category.name}" — it has ${category._count.diagrams} diagram(s). Re-assign or delete them first.`,
+        },
+      };
+    }
+    if (category._count.children > 0) {
+      return {
+        errors: {
+          general: `Cannot delete "${category.name}" — it has subcategories. Delete or re-assign them first.`,
         },
       };
     }
@@ -89,62 +98,322 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 type LoadedCategory = Awaited<ReturnType<typeof loader>>["categories"][number];
+type TreeNode = LoadedCategory & { treeChildren: TreeNode[] };
 
-function flattenCategories(categories: LoadedCategory[]): LoadedCategory[] {
-  const roots = categories.filter((c) => !c.parentId);
-  const result: LoadedCategory[] = [];
-  for (const root of roots) {
-    result.push(root);
-    for (const child of categories.filter((c) => c.parentId === root.id)) {
-      result.push(child);
+function buildTree(categories: LoadedCategory[]): TreeNode[] {
+  const map = new Map<number, TreeNode>();
+  for (const cat of categories) map.set(cat.id, { ...cat, treeChildren: [] });
+
+  const roots: TreeNode[] = [];
+  for (const [, node] of map) {
+    if (!node.parentId || !map.has(node.parentId)) {
+      roots.push(node);
+    } else {
+      map.get(node.parentId)!.treeChildren.push(node);
     }
   }
-  return result;
+
+  function sort(nodes: TreeNode[]) {
+    nodes.sort((a, b) => a.name.localeCompare(b.name));
+    for (const n of nodes) sort(n.treeChildren);
+  }
+  sort(roots);
+  return roots;
 }
 
-type ModalEl = HTMLElement & { showOverlay?: () => void; hideOverlay?: () => void };
+// ─── Shared modal styles ──────────────────────────────────────────────────────
+
+const modalDialogStyle: React.CSSProperties = {
+  border: "none",
+  borderRadius: "8px",
+  padding: 0,
+  maxWidth: "500px",
+  width: "90vw",
+  boxShadow: "0 4px 20px rgba(0,0,0,.22)",
+  background: "#fff",
+  color: "inherit",
+  fontFamily: "inherit",
+};
 
 function AppModal({ heading, onHide, children }: {
   heading: string;
   onHide: () => void;
   children: (dismiss: () => void) => ReactNode;
 }) {
-  const ref = useRef<ModalEl | null>(null);
+  const ref = useRef<HTMLDialogElement | null>(null);
   const onHideRef = useRef(onHide);
   onHideRef.current = onHide;
-  const dismissedRef = useRef(false);
 
-  const dismiss = useCallback(() => {
-    if (dismissedRef.current) return;
-    dismissedRef.current = true;
-    onHideRef.current();
-  }, []);
+  const dismiss = useCallback(() => { ref.current?.close(); }, []);
 
   useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.showOverlay?.();
+    const dialog = ref.current;
+    if (!dialog) return;
+    dialog.showModal();
 
-    const onClose = () => dismiss();
-    const onToggle = (e: Event) => {
-      if ((e as Event & { newState?: string }).newState === "closed") dismiss();
+    const onClose = () => onHideRef.current();
+    const onCancel = (e: Event) => { e.preventDefault(); dialog.close(); };
+    const onClick = (e: MouseEvent) => {
+      const r = dialog.getBoundingClientRect();
+      if (
+        e.clientX < r.left || e.clientX > r.right ||
+        e.clientY < r.top  || e.clientY > r.bottom
+      ) dialog.close();
     };
-    el.addEventListener("hide", onClose);
-    el.addEventListener("afterhide", onClose);
-    el.addEventListener("close", onClose);
-    el.addEventListener("toggle", onToggle);
+
+    dialog.addEventListener("close", onClose);
+    dialog.addEventListener("cancel", onCancel);
+    dialog.addEventListener("click", onClick);
     return () => {
-      el.removeEventListener("hide", onClose);
-      el.removeEventListener("afterhide", onClose);
-      el.removeEventListener("close", onClose);
-      el.removeEventListener("toggle", onToggle);
-      el.hideOverlay?.();
+      dialog.removeEventListener("close", onClose);
+      dialog.removeEventListener("cancel", onCancel);
+      dialog.removeEventListener("click", onClick);
     };
-  }, [dismiss]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return <s-modal ref={ref as any} heading={heading}>{children(dismiss)}</s-modal>;
+  return (
+    <dialog ref={ref} className="app-modal" style={modalDialogStyle}>
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "16px 20px", borderBottom: "1px solid #e1e3e5",
+      }}>
+        <span style={{ fontSize: "16px", fontWeight: 600, color: "#202223" }}>{heading}</span>
+        <button onClick={dismiss} aria-label="Close" style={{
+          background: "none", border: "none", cursor: "pointer",
+          padding: "4px 8px", borderRadius: "4px", fontSize: "18px", lineHeight: 1, color: "#6d7175",
+        }}>✕</button>
+      </div>
+      <div style={{ padding: "20px" }}>{children(dismiss)}</div>
+    </dialog>
+  );
 }
+
+// ─── Icons ───────────────────────────────────────────────────────────────────
+
+function PencilIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+      <path d="M13.586 3.586a2 2 0 1 1 2.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+      <path fillRule="evenodd" clipRule="evenodd" d="M9 2a1 1 0 0 0-.894.553L7.382 4H4a1 1 0 0 0 0 2v10a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6a1 1 0 0 0 0-2h-3.382l-.724-1.447A1 1 0 0 0 11 2H9zM7 8a1 1 0 0 1 2 0v6a1 1 0 0 1-2 0V8zm5-1a1 1 0 0 0-1 1v6a1 1 0 0 0 2 0V8a1 1 0 0 0-1-1z" />
+    </svg>
+  );
+}
+
+function ChevronIcon({ up }: { up: boolean }) {
+  return (
+    <svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor">
+      <path fillRule="evenodd" clipRule="evenodd" d={up
+        ? "M14.707 12.707a1 1 0 0 1-1.414 0L10 9.414l-3.293 3.293a1 1 0 0 1-1.414-1.414l4-4a1 1 0 0 1 1.414 0l4 4a1 1 0 0 1 0 1.414z"
+        : "M5.293 7.293a1 1 0 0 1 1.414 0L10 10.586l3.293-3.293a1 1 0 1 1 1.414 1.414l-4 4a1 1 0 0 1-1.414 0l-4-4a1 1 0 0 1 0-1.414z"
+      } />
+    </svg>
+  );
+}
+
+function FolderIcon({ size = 22, color = "#c0c4c9" }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
+      <path d="M3 7a2 2 0 0 1 2-2h4.586a1 1 0 0 1 .707.293L11.707 6.7A1 1 0 0 0 12.414 7H19a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+    </svg>
+  );
+}
+
+function IconBtn({ onClick, title, danger, children }: {
+  onClick: () => void;
+  title: string;
+  danger?: boolean;
+  children: ReactNode;
+}) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        background: hov ? (danger ? "#fff0ee" : "#f1f2f3") : "transparent",
+        border: "none",
+        borderRadius: "5px",
+        padding: "5px",
+        cursor: "pointer",
+        color: hov ? (danger ? "#c0392b" : "#3d3d3d") : "#9ca3af",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+        lineHeight: 1,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function AddSubBtn({ onClick }: { onClick: () => void }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      title="Add subcategory"
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        background: hov ? "#dcf5ed" : "#edf9f4",
+        border: "1px solid #a3d9be",
+        borderRadius: "20px",
+        padding: "3px 8px 3px 5px",
+        cursor: "pointer",
+        fontSize: "11px",
+        fontWeight: 600,
+        color: "#1a7a54",
+        display: "flex",
+        alignItems: "center",
+        gap: "3px",
+        lineHeight: "16px",
+        flexShrink: 0,
+      }}
+    >
+      <svg width="11" height="11" viewBox="0 0 20 20" fill="currentColor">
+        <path fillRule="evenodd" clipRule="evenodd" d="M10 3a1 1 0 0 1 1 1v5h5a1 1 0 1 1 0 2h-5v5a1 1 0 1 1-2 0v-5H4a1 1 0 1 1 0-2h5V4a1 1 0 0 1 1-1z" />
+      </svg>
+      Sub
+    </button>
+  );
+}
+
+// ─── Tree Row (Notion-style) ──────────────────────────────────────────────────
+
+const FOLDER_COLORS = ["#f59e0b", "#6366f1", "#10b981", "#ef4444", "#8b5cf6", "#06b6d4", "#f97316"];
+
+function TreeRow({ node, depth, onEdit, onDelete, onAddChild, rootColorIndex = 0 }: {
+  node: TreeNode;
+  depth: number;
+  onEdit: (cat: LoadedCategory) => void;
+  onDelete: (cat: LoadedCategory) => void;
+  onAddChild: (parentId: number) => void;
+  rootColorIndex?: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const hasChildren = node.treeChildren.length > 0;
+  const isRoot = depth === 0;
+
+  // Root gets a warm accent colour; deeper levels fade to grey
+  const iconColor = isRoot
+    ? FOLDER_COLORS[rootColorIndex % FOLDER_COLORS.length]
+    : depth === 1 ? "#94a3b8" : "#c4ccd5";
+
+  // Badge: prefer child count, else diagram count
+  const badge = hasChildren
+    ? node.treeChildren.length
+    : node._count.diagrams > 0 ? node._count.diagrams : null;
+
+  return (
+    <>
+      <div
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "4px",
+          padding: `5px 10px 5px ${14 + depth * 20}px`,
+          borderRadius: "6px",
+          background: hovered ? "#f3f4f6" : "transparent",
+          cursor: "default",
+          minHeight: "34px",
+        }}
+      >
+        {/* Chevron — reserves space even when no children so names align */}
+        <div style={{ width: 18, height: 18, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {hasChildren ? (
+            <button
+              onClick={() => setExpanded(e => !e)}
+              style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: "#9ca3af", display: "flex" }}
+            >
+              <ChevronIcon up={expanded} />
+            </button>
+          ) : null}
+        </div>
+
+        {/* Folder icon or tiny image */}
+        <div style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>
+          {node.imageUrl ? (
+            <img
+              src={node.imageUrl} alt=""
+              style={{ width: isRoot ? 20 : 16, height: isRoot ? 20 : 16, borderRadius: "3px", objectFit: "cover" }}
+            />
+          ) : (
+            <FolderIcon size={isRoot ? 18 : 16} color={iconColor} />
+          )}
+        </div>
+
+        {/* Name */}
+        <span style={{
+          flex: 1,
+          fontSize: isRoot ? "14px" : "13px",
+          fontWeight: isRoot ? 600 : 400,
+          color: "#111827",
+          lineHeight: "1.4",
+          wordBreak: "break-word",
+        }}>
+          {node.name}
+        </span>
+
+        {/* Badge when idle, actions when hovered */}
+        {hovered ? (
+          <div style={{ display: "flex", alignItems: "center", gap: "2px", flexShrink: 0 }}>
+            <AddSubBtn onClick={() => onAddChild(node.id)} />
+            <IconBtn onClick={() => onEdit(node)} title="Edit category">
+              <PencilIcon />
+            </IconBtn>
+            <IconBtn onClick={() => onDelete(node)} title="Delete category" danger>
+              <TrashIcon />
+            </IconBtn>
+          </div>
+        ) : (
+          badge !== null && (
+            <span style={{
+              background: "#f1f5f9",
+              color: "#64748b",
+              fontSize: "11px",
+              fontWeight: 500,
+              padding: "1px 8px",
+              borderRadius: "10px",
+              flexShrink: 0,
+            }}>
+              {badge}
+            </span>
+          )
+        )}
+      </div>
+
+      {/* Children — same component, deeper indent */}
+      {hasChildren && expanded && node.treeChildren.map(child => (
+        <TreeRow
+          key={child.id}
+          node={child}
+          depth={depth + 1}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          onAddChild={onAddChild}
+          rootColorIndex={rootColorIndex}
+        />
+      ))}
+    </>
+  );
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function CategoriesPage() {
   const { categories, search } = useLoaderData<typeof loader>();
@@ -153,15 +422,33 @@ export default function CategoriesPage() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editCategory, setEditCategory] = useState<CategoryItem | null>(null);
+  const [defaultParentId, setDefaultParentId] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<LoadedCategory | null>(null);
   const [deleteError, setDeleteError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
 
-  const rootCategories: CategoryItem[] = categories
-    .filter((c) => !c.parentId)
-    .map((c) => ({ id: c.id, name: c.name, imageUrl: c.imageUrl, parentId: c.parentId }));
+  const allCategories: CategoryItem[] = categories.map((c) => ({
+    id: c.id,
+    name: c.name,
+    imageUrl: c.imageUrl,
+    parentId: c.parentId,
+  }));
+
+  useEffect(() => {
+    if (!successMessage) return;
+    const t = setTimeout(() => setSuccessMessage(""), 4000);
+    return () => clearTimeout(t);
+  }, [successMessage]);
 
   function openCreate() {
     setEditCategory(null);
+    setDefaultParentId(null);
+    setModalOpen(true);
+  }
+
+  function openCreateWithParent(parentId: number) {
+    setEditCategory(null);
+    setDefaultParentId(parentId);
     setModalOpen(true);
   }
 
@@ -172,15 +459,29 @@ export default function CategoriesPage() {
       imageUrl: cat.imageUrl,
       parentId: cat.parentId,
     });
+    setDefaultParentId(null);
     setModalOpen(true);
   }
 
   function closeModal() {
     setModalOpen(false);
     setEditCategory(null);
+    setDefaultParentId(null);
   }
 
-  async function handleDelete(cat: LoadedCategory) {
+  function handleSaved(msg: string) {
+    setSuccessMessage(msg);
+    closeModal();
+    navigate(".", { replace: true });
+  }
+
+  function handleDelete(cat: LoadedCategory) {
+    const hasChildren = (categories as LoadedCategory[]).some(c => c.parentId === cat.id);
+    if (hasChildren) {
+      setDeleteError(`Cannot delete "${cat.name}" — it has subcategories. Delete or re-assign them first.`);
+      setDeleteTarget(cat);
+      return;
+    }
     if (cat._count.diagrams > 0) {
       setDeleteError(
         `Cannot delete "${cat.name}" — it has ${cat._count.diagrams} diagram(s). Re-assign or delete them first.`,
@@ -198,20 +499,20 @@ export default function CategoriesPage() {
     fd.set("intent", "delete");
     fd.set("id", String(deleteTarget.id));
     await fetch(window.location.pathname, { method: "POST", body: fd });
+    setSuccessMessage(`"${deleteTarget.name}" deleted.`);
+    setDeleteTarget(null);
     navigate(".", { replace: true });
   }
 
   function updateSearch(value: string) {
     const params = new URLSearchParams(searchParams);
-    if (value) {
-      params.set("search", value);
-    } else {
-      params.delete("search");
-    }
+    if (value) params.set("search", value);
+    else params.delete("search");
     navigate(`?${params.toString()}`, { replace: true });
   }
 
-  const sorted = flattenCategories(categories as LoadedCategory[]);
+  const tree = buildTree(categories as LoadedCategory[]);
+  const totalCount = categories.length;
 
   return (
     <s-page heading="Categories">
@@ -220,16 +521,33 @@ export default function CategoriesPage() {
       </s-button>
 
       <s-section>
-        <s-search-field
-          label="Search categories"
-          value={search}
-          onInput={(e: Event) =>
-            updateSearch((e.currentTarget as HTMLInputElement).value)
-          }
-          placeholder="Search by name…"
-        />
-        {sorted.length === 0 ? (
-          <div style={{ padding: "32px 0", textAlign: "center" }}>
+        {successMessage && (
+          <div style={{ marginBottom: "16px" }}>
+            <s-banner tone="success">{successMessage}</s-banner>
+          </div>
+        )}
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px", gap: "12px", flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: "200px" }}>
+            <s-search-field
+              label="Search categories"
+              value={search}
+              onInput={(e: Event) =>
+                updateSearch((e.currentTarget as HTMLInputElement).value)
+              }
+              placeholder="Search by name…"
+            />
+          </div>
+          {!search && totalCount > 0 && (
+            <div style={{ fontSize: "13px", color: "#6d7175", whiteSpace: "nowrap" }}>
+              {totalCount} categor{totalCount !== 1 ? "ies" : "y"} · {tree.length} root
+            </div>
+          )}
+        </div>
+
+        {tree.length === 0 ? (
+          <div style={{ padding: "48px 0", textAlign: "center" }}>
+            <div style={{ fontSize: "32px", marginBottom: "12px" }}>📂</div>
             <s-text>
               {search
                 ? `No categories match "${search}".`
@@ -237,63 +555,41 @@ export default function CategoriesPage() {
             </s-text>
           </div>
         ) : (
-          <s-table variant="auto">
-            <s-table-header-row>
-              <s-table-header>Image</s-table-header>
-              <s-table-header>Name</s-table-header>
-              <s-table-header>Parent</s-table-header>
-              <s-table-header>Diagrams</s-table-header>
-              <s-table-header>Actions</s-table-header>
-            </s-table-header-row>
-            <s-table-body>
-              {sorted.map((cat) => (
-                <s-table-row key={cat.id}>
-                  <s-table-cell>
-                    {cat.imageUrl && (
-                      <s-thumbnail src={cat.imageUrl} alt={cat.name} size="small" />
-                    )}
-                  </s-table-cell>
-                  <s-table-cell>
-                    {cat.parentId ? (
-                      <span style={{ display: "flex", alignItems: "center", gap: "6px", paddingLeft: "16px" }}>
-                        {/* <span style={{ color: "#8c9196" }}>—</span> */}
-                        <s-text>{cat.name}</s-text>
-                      </span>
-                    ) : (
-                      <s-text>{cat.name}</s-text>
-                    )}
-                  </s-table-cell>
-                  <s-table-cell>
-                    <s-text>{cat.parent?.name ?? "N/A"}</s-text>
-                  </s-table-cell>
-                  <s-table-cell>
-                    <s-badge>{String(cat._count.diagrams)}</s-badge>
-                  </s-table-cell>
-                  <s-table-cell>
-                    <div style={{ display: "flex", gap: "8px" }}>
-                      <s-button variant="secondary" onClick={() => openEdit(cat)}>
-                        Edit
-                      </s-button>
-                      <s-button variant="tertiary" onClick={() => handleDelete(cat)}>
-                        Delete
-                      </s-button>
-                    </div>
-                  </s-table-cell>
-                </s-table-row>
-              ))}
-            </s-table-body>
-          </s-table>
+          <div style={{
+            border: "1px solid #e5e7eb",
+            borderRadius: "10px",
+            background: "#fff",
+            overflow: "hidden",
+            padding: "6px",
+          }}>
+            {tree.map((root, i) => (
+              <div key={root.id}>
+                {i > 0 && (
+                  <div style={{ height: "1px", background: "#f1f5f9", margin: "2px 10px" }} />
+                )}
+                <TreeRow
+                  node={root}
+                  depth={0}
+                  rootColorIndex={i}
+                  onEdit={openEdit}
+                  onDelete={handleDelete}
+                  onAddChild={openCreateWithParent}
+                />
+              </div>
+            ))}
+          </div>
         )}
       </s-section>
 
       <CategoryModal
         open={modalOpen}
         onClose={closeModal}
-        rootCategories={rootCategories}
+        onSaved={handleSaved}
+        allCategories={allCategories}
         editCategory={editCategory}
+        defaultParentId={defaultParentId}
       />
 
-      {/* Delete confirmation modal */}
       {deleteTarget && (
         <AppModal heading="Delete category" onHide={() => setDeleteTarget(null)}>
           {(dismiss) => (
@@ -302,24 +598,21 @@ export default function CategoriesPage() {
                 <s-banner tone="critical">{deleteError}</s-banner>
               ) : (
                 <s-text>
-                  Are you sure you want to delete "{deleteTarget.name}"? This cannot be
-                  undone.
+                  Are you sure you want to delete &ldquo;{deleteTarget.name}&rdquo;? This cannot be undone.
                 </s-text>
               )}
-
-              {!deleteError && (
-                <s-button
-                  slot="primary-action"
-                  variant="primary"
-                  tone="critical"
-                  onClick={() => { dismiss(); confirmDelete(); }}
-                >
-                  Delete
-                </s-button>
-              )}
-              <s-button slot="secondary-actions" onClick={dismiss}>
-                Cancel
-              </s-button>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "20px" }}>
+                <s-button variant="secondary" onClick={dismiss}>Cancel</s-button>
+                {!deleteError && (
+                  <s-button
+                    variant="primary"
+                    tone="critical"
+                    onClick={() => { dismiss(); confirmDelete(); }}
+                  >
+                    Delete
+                  </s-button>
+                )}
+              </div>
             </>
           )}
         </AppModal>
