@@ -17,14 +17,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const where = {
     ...(search ? { title: { contains: search, mode: "insensitive" as const } } : {}),
-    ...(categoryId ? { categoryId: Number(categoryId) } : {}),
+    ...(categoryId ? { categories: { some: { categoryId: Number(categoryId) } } } : {}),
   };
 
   const [diagrams, total, categories] = await Promise.all([
     db.diagram.findMany({
       where,
       include: {
-        category: true,
+        categories: { include: { category: { select: { id: true, name: true } } } },
         _count: { select: { products: true } },
       },
       orderBy: { createdAt: "desc" },
@@ -67,50 +67,87 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return { errors: { general: "Unknown intent" } };
 };
 
-type ModalEl = HTMLElement & { showOverlay?: () => void; hideOverlay?: () => void };
+const modalDialogStyle: React.CSSProperties = {
+  border: "none",
+  borderRadius: "8px",
+  padding: 0,
+  maxWidth: "600px",
+  width: "90vw",
+  boxShadow: "0 4px 20px rgba(0,0,0,.22)",
+  background: "#fff",
+  color: "inherit",
+  fontFamily: "inherit",
+};
 
 function AppModal({ heading, onHide, children }: {
   heading: string;
   onHide: () => void;
   children: (dismiss: () => void) => ReactNode;
 }) {
-  const ref = useRef<ModalEl | null>(null);
+  const ref = useRef<HTMLDialogElement | null>(null);
   const onHideRef = useRef(onHide);
   onHideRef.current = onHide;
-  const dismissedRef = useRef(false);
 
   const dismiss = useCallback(() => {
-    if (dismissedRef.current) return;
-    dismissedRef.current = true;
-    onHideRef.current();
+    ref.current?.close();
   }, []);
 
   useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.showOverlay?.();
+    const dialog = ref.current;
+    if (!dialog) return;
+    dialog.showModal();
 
-    // s-modal may dispatch any of these events when the X button is clicked —
-    // listen to all so it works regardless of Polaris version.
-    const onClose = () => dismiss();
-    const onToggle = (e: Event) => {
-      if ((e as Event & { newState?: string }).newState === "closed") dismiss();
+    // "close" fires after dialog.close() or Escape — safe to unmount here.
+    const onClose = () => onHideRef.current();
+    // Intercept Escape so it routes through dialog.close() → "close" event.
+    const onCancel = (e: Event) => { e.preventDefault(); dialog.close(); };
+    // Backdrop click: click target is the <dialog> itself when outside content.
+    const onClick = (e: MouseEvent) => {
+      const r = dialog.getBoundingClientRect();
+      if (
+        e.clientX < r.left || e.clientX > r.right ||
+        e.clientY < r.top  || e.clientY > r.bottom
+      ) dialog.close();
     };
-    el.addEventListener("hide", onClose);
-    el.addEventListener("afterhide", onClose);
-    el.addEventListener("close", onClose);
-    el.addEventListener("toggle", onToggle);
+
+    dialog.addEventListener("close", onClose);
+    dialog.addEventListener("cancel", onCancel);
+    dialog.addEventListener("click", onClick);
     return () => {
-      el.removeEventListener("hide", onClose);
-      el.removeEventListener("afterhide", onClose);
-      el.removeEventListener("close", onClose);
-      el.removeEventListener("toggle", onToggle);
-      el.hideOverlay?.();
+      dialog.removeEventListener("close", onClose);
+      dialog.removeEventListener("cancel", onCancel);
+      dialog.removeEventListener("click", onClick);
     };
-  }, [dismiss]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return <s-modal ref={ref as any} heading={heading}>{children(dismiss)}</s-modal>;
+  return (
+    <dialog ref={ref} className="app-modal" style={modalDialogStyle}>
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "16px 20px",
+        borderBottom: "1px solid #e1e3e5",
+      }}>
+        <span style={{ fontSize: "16px", fontWeight: 600, color: "#202223" }}>{heading}</span>
+        <button
+          onClick={dismiss}
+          aria-label="Close"
+          style={{
+            background: "none", border: "none", cursor: "pointer",
+            padding: "4px 8px", borderRadius: "4px",
+            fontSize: "18px", lineHeight: 1, color: "#6d7175",
+          }}
+        >
+          ✕
+        </button>
+      </div>
+      <div style={{ padding: "20px" }}>
+        {children(dismiss)}
+      </div>
+    </dialog>
+  );
 }
 
 export default function DiagramsPage() {
@@ -123,6 +160,11 @@ export default function DiagramsPage() {
   const [selected, setSelected] = useState<number[]>([]);
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
+
+  const successParam = searchParams.get("success");
+  const successMessage =
+    successParam === "created" ? "Diagram created successfully." :
+    successParam === "updated" ? "Diagram updated successfully." : "";
 
   function updateParam(key: string, value: string) {
     const params = new URLSearchParams(searchParams);
@@ -174,6 +216,12 @@ export default function DiagramsPage() {
       </s-button>
 
       <s-section>
+        {successMessage && (
+          <div style={{ marginBottom: "16px" }}>
+            <s-banner tone="success">{successMessage}</s-banner>
+          </div>
+        )}
+
         <s-stack direction="inline" gap="base">
           <s-search-field
             label="Search diagrams"
@@ -265,7 +313,11 @@ export default function DiagramsPage() {
                     <s-link href={`/app/diagrams/${d.id}/edit`}>{d.title}</s-link>
                   </s-table-cell>
                   <s-table-cell>
-                    <s-text>{d.category?.name ?? "—"}</s-text>
+                    <s-text>
+                      {d.categories.length > 0
+                        ? d.categories.map((dc) => dc.category.name).join(", ")
+                        : "—"}
+                    </s-text>
                   </s-table-cell>
                   <s-table-cell>
                     <s-badge>{String(d._count.products)}</s-badge>
@@ -302,17 +354,16 @@ export default function DiagramsPage() {
           {(dismiss) => (
             <>
               <s-text>Are you sure you want to delete this diagram? This cannot be undone.</s-text>
-              <s-button
-                slot="primary-action"
-                variant="primary"
-                tone="critical"
-                onClick={() => { dismiss(); confirmDelete(deleteTarget!); }}
-              >
-                Delete
-              </s-button>
-              <s-button slot="secondary-actions" onClick={dismiss}>
-                Cancel
-              </s-button>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "20px" }}>
+                <s-button variant="secondary" onClick={dismiss}>Cancel</s-button>
+                <s-button
+                  variant="primary"
+                  tone="critical"
+                  onClick={() => { dismiss(); confirmDelete(deleteTarget!); }}
+                >
+                  Delete
+                </s-button>
+              </div>
             </>
           )}
         </AppModal>
@@ -327,17 +378,16 @@ export default function DiagramsPage() {
                 Are you sure you want to delete {selected.length} diagram
                 {selected.length !== 1 ? "s" : ""}? This cannot be undone.
               </s-text>
-              <s-button
-                slot="primary-action"
-                variant="primary"
-                tone="critical"
-                onClick={() => { dismiss(); confirmBulkDelete(); }}
-              >
-                Delete all
-              </s-button>
-              <s-button slot="secondary-actions" onClick={dismiss}>
-                Cancel
-              </s-button>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "20px" }}>
+                <s-button variant="secondary" onClick={dismiss}>Cancel</s-button>
+                <s-button
+                  variant="primary"
+                  tone="critical"
+                  onClick={() => { dismiss(); confirmBulkDelete(); }}
+                >
+                  Delete all
+                </s-button>
+              </div>
             </>
           )}
         </AppModal>

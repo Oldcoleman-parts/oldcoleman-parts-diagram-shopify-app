@@ -2,12 +2,7 @@ import { useState } from "react";
 import { Form } from "react-router";
 import { FileUpload } from "./FileUpload";
 import { ProductPicker, type SelectedProduct } from "./ProductPicker";
-
-export interface FlatCategory {
-  id: number;
-  name: string;
-  displayName: string; // indented for children
-}
+import { CategoryPicker, type CategoryPickerItem } from "./CategoryPicker";
 
 interface DiagramData {
   id: number;
@@ -16,14 +11,15 @@ interface DiagramData {
   description: string | null;
   imageUrl: string | null;
   fileUrl: string | null;
-  categoryId: number | null;
+  categoryIds: number[];
   products: SelectedProduct[];
 }
 
 interface Props {
   diagram?: DiagramData;
-  categories: FlatCategory[];
+  allCategories: CategoryPickerItem[];
   isSubmitting: boolean;
+  errors?: Record<string, string>;
 }
 
 function toHandle(title: string) {
@@ -33,15 +29,15 @@ function toHandle(title: string) {
     .replace(/^-|-$/g, "");
 }
 
-export function DiagramForm({ diagram, categories, isSubmitting }: Props) {
+export function DiagramForm({ diagram, allCategories, isSubmitting, errors = {} }: Props) {
   const [title, setTitle] = useState(diagram?.title ?? "");
   const [handle, setHandle] = useState(diagram?.handle ?? "");
   const [handleTouched, setHandleTouched] = useState(!!diagram);
   const [description, setDescription] = useState(diagram?.description ?? "");
   const [imageUrl, setImageUrl] = useState(diagram?.imageUrl ?? "");
   const [fileUrl, setFileUrl] = useState(diagram?.fileUrl ?? "");
-  const [categoryId, setCategoryId] = useState(
-    diagram?.categoryId ? String(diagram.categoryId) : "",
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>(
+    diagram?.categoryIds ?? [],
   );
   const [selectedProducts, setSelectedProducts] = useState<SelectedProduct[]>(
     diagram?.products ?? [],
@@ -56,10 +52,7 @@ export function DiagramForm({ diagram, categories, isSubmitting }: Props) {
 
   function handleProductsChange(products: SelectedProduct[]) {
     setSelectedProducts(products);
-    // Clear fileUrl when products are added (mutually exclusive per spec)
-    if (products.length > 0) {
-      setFileUrl("");
-    }
+    if (products.length > 0) setFileUrl("");
   }
 
   const hasProducts = selectedProducts.length > 0;
@@ -75,6 +68,7 @@ export function DiagramForm({ diagram, categories, isSubmitting }: Props) {
             handleTitleChange((e.currentTarget as HTMLInputElement).value)
           }
           required
+          error={errors.title}
         />
 
         <div>
@@ -87,6 +81,7 @@ export function DiagramForm({ diagram, categories, isSubmitting }: Props) {
               setHandleTouched(true);
             }}
             details="URL slug — auto-generated from title, must be unique"
+            error={errors.handle}
           />
           {handle && (
             <s-text>
@@ -107,25 +102,52 @@ export function DiagramForm({ diagram, categories, isSubmitting }: Props) {
           }
         />
 
+        {/* Multi-category picker */}
         <div>
-          <s-select
-            label="Category"
-            name="categoryId"
-            value={categoryId}
-            onChange={(e: Event) =>
-              setCategoryId((e.currentTarget as HTMLSelectElement).value)
-            }
-          >
-            <s-option value="">— No category —</s-option>
-            {categories.map((c) => (
-              <s-option key={c.id} value={String(c.id)}>
-                {c.displayName}
-              </s-option>
-            ))}
-          </s-select>
-          <s-text>
-            <s-link href="/app/categories">Manage categories</s-link>
-          </s-text>
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: "8px",
+          }}>
+            <span style={{ fontSize: "13px", fontWeight: 500, color: "#202223" }}>
+              Categories
+              {selectedCategoryIds.length > 0 && (
+                <span style={{
+                  marginLeft: "6px",
+                  background: "#008060",
+                  color: "#fff",
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  padding: "1px 7px",
+                  borderRadius: "10px",
+                }}>
+                  {selectedCategoryIds.length}
+                </span>
+              )}
+            </span>
+            <a
+              href="/app/categories"
+              style={{ fontSize: "12px", color: "#2c6ecb", textDecoration: "none" }}
+            >
+              Manage categories →
+            </a>
+          </div>
+          <input
+            type="hidden"
+            name="categoryIds"
+            value={JSON.stringify(selectedCategoryIds)}
+          />
+          <CategoryPicker
+            allCategories={allCategories}
+            selectedIds={selectedCategoryIds}
+            onChange={setSelectedCategoryIds}
+          />
+          {selectedCategoryIds.length === 0 && (
+            <div style={{ fontSize: "12px", color: "#9ca3af", marginTop: "6px" }}>
+              Select one or more categories to help customers filter diagrams.
+            </div>
+          )}
         </div>
 
         <div>
@@ -170,14 +192,9 @@ export function DiagramForm({ diagram, categories, isSubmitting }: Props) {
           </div>
         )}
 
-        {/* Ensure fileUrl is always sent (empty string when products present) */}
         {hasProducts && <input type="hidden" name="fileUrl" value="" />}
 
-        <s-button
-          variant="primary"
-          type="submit"
-          loading={isSubmitting}
-        >
+        <s-button variant="primary" type="submit" loading={isSubmitting}>
           {diagram ? "Save changes" : "Create diagram"}
         </s-button>
       </s-stack>

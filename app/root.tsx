@@ -11,6 +11,10 @@ export default function App() {
           rel="stylesheet"
           href="https://cdn.shopify.com/static/fonts/inter/v4/styles.css"
         />
+        <style>{`
+          dialog.app-modal { position: fixed; }
+          dialog.app-modal::backdrop { background: rgba(0,0,0,.5); }
+        `}</style>
         <Meta />
         <Links />
       </head>

@@ -12,64 +12,155 @@ export interface CategoryItem {
 interface Props {
   open: boolean;
   onClose: () => void;
-  rootCategories: CategoryItem[];
+  onSaved?: (message: string) => void;
+  allCategories: CategoryItem[];
   editCategory?: CategoryItem | null;
+  defaultParentId?: number | null;
 }
 
-// Outer wrapper: only mounts the inner modal when open.
-// Unmounting resets all state and fetcher data automatically.
 export function CategoryModal(props: Props) {
   if (!props.open) return null;
   return <CategoryModalInner {...props} />;
 }
 
-function CategoryModalInner({ onClose, rootCategories, editCategory }: Props) {
+const dialogStyle: React.CSSProperties = {
+  border: "none",
+  borderRadius: "8px",
+  padding: 0,
+  maxWidth: "600px",
+  width: "90vw",
+  boxShadow: "0 4px 20px rgba(0,0,0,.22)",
+  background: "#fff",
+  color: "inherit",
+  fontFamily: "inherit",
+};
+
+const headerStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  padding: "16px 20px",
+  borderBottom: "1px solid #e1e3e5",
+};
+
+const footerStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "flex-end",
+  gap: "8px",
+  padding: "16px 20px",
+  borderTop: "1px solid #e1e3e5",
+};
+
+const closeBtnStyle: React.CSSProperties = {
+  background: "none",
+  border: "none",
+  cursor: "pointer",
+  padding: "4px 8px",
+  borderRadius: "4px",
+  fontSize: "18px",
+  lineHeight: 1,
+  color: "#6d7175",
+};
+
+interface SelectOption {
+  id: number;
+  label: string;
+}
+
+function buildSelectOptions(cats: CategoryItem[], excludeId?: number): SelectOption[] {
+  const map = new Map<number, CategoryItem & { children: CategoryItem[] }>();
+  for (const c of cats) map.set(c.id, { ...c, children: [] });
+
+  const roots: Array<CategoryItem & { children: CategoryItem[] }> = [];
+  for (const [, node] of map) {
+    if (!node.parentId || !map.has(node.parentId)) {
+      roots.push(node);
+    } else {
+      map.get(node.parentId)!.children.push(node);
+    }
+  }
+
+  // Collect self + all descendants to exclude from parent options (prevents circular refs)
+  const excluded = new Set<number>();
+  if (excludeId !== undefined) {
+    const queue = [excludeId];
+    while (queue.length) {
+      const id = queue.shift()!;
+      excluded.add(id);
+      const node = map.get(id);
+      if (node) for (const child of node.children) queue.push(child.id);
+    }
+  }
+
+  const result: SelectOption[] = [];
+  function traverse(nodes: Array<CategoryItem & { children: CategoryItem[] }>, depth: number) {
+    const sorted = [...nodes].sort((a, b) => a.name.localeCompare(b.name));
+    for (const node of sorted) {
+      if (excluded.has(node.id)) continue;
+      const prefix = depth === 0 ? "" : "—".repeat(depth) + " ";
+      result.push({ id: node.id, label: prefix + node.name });
+      traverse(node.children as Array<CategoryItem & { children: CategoryItem[] }>, depth + 1);
+    }
+  }
+  traverse(roots, 0);
+  return result;
+}
+
+function CategoryModalInner({ onClose, onSaved, allCategories, editCategory, defaultParentId }: Props) {
   const fetcher = useFetcher<{ errors?: Record<string, string> }>();
-  const modalRef = useRef<HTMLElement & { showOverlay?: () => void; hideOverlay?: () => void } | null>(null);
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
-  const dismissedRef = useRef(false);
+  const onSavedRef = useRef(onSaved);
+  onSavedRef.current = onSaved;
 
   const [name, setName] = useState(editCategory?.name ?? "");
   const [imageUrl, setImageUrl] = useState(editCategory?.imageUrl ?? "");
   const [parentId, setParentId] = useState(
-    editCategory?.parentId ? String(editCategory.parentId) : "",
+    editCategory?.parentId
+      ? String(editCategory.parentId)
+      : defaultParentId
+        ? String(defaultParentId)
+        : "",
   );
 
   const dismiss = useCallback(() => {
-    if (dismissedRef.current) return;
-    dismissedRef.current = true;
-    onCloseRef.current();
+    dialogRef.current?.close();
   }, []);
 
   useEffect(() => {
-    const el = modalRef.current;
-    if (!el) return;
-    el.showOverlay?.();
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    dialog.showModal();
 
-    const onClose = () => dismiss();
-    const onToggle = (e: Event) => {
-      if ((e as Event & { newState?: string }).newState === "closed") dismiss();
+    const onClose = () => onCloseRef.current();
+    const onCancel = (e: Event) => { e.preventDefault(); dialog.close(); };
+    const onClick = (e: MouseEvent) => {
+      const r = dialog.getBoundingClientRect();
+      if (
+        e.clientX < r.left || e.clientX > r.right ||
+        e.clientY < r.top  || e.clientY > r.bottom
+      ) dialog.close();
     };
-    el.addEventListener("hide", onClose);
-    el.addEventListener("afterhide", onClose);
-    el.addEventListener("close", onClose);
-    el.addEventListener("toggle", onToggle);
+
+    dialog.addEventListener("close", onClose);
+    dialog.addEventListener("cancel", onCancel);
+    dialog.addEventListener("click", onClick);
     return () => {
-      el.removeEventListener("hide", onClose);
-      el.removeEventListener("afterhide", onClose);
-      el.removeEventListener("close", onClose);
-      el.removeEventListener("toggle", onToggle);
-      el.hideOverlay?.();
+      dialog.removeEventListener("close", onClose);
+      dialog.removeEventListener("cancel", onCancel);
+      dialog.removeEventListener("click", onClick);
     };
-  }, [dismiss]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Auto-close after a successful submit
   useEffect(() => {
     if (fetcher.state === "idle" && fetcher.data && !fetcher.data.errors) {
+      const msg = editCategory ? "Category updated successfully." : "Category created successfully.";
+      onSavedRef.current?.(msg);
       dismiss();
     }
-  }, [fetcher.state, fetcher.data, dismiss]);
+  }, [fetcher.state, fetcher.data, editCategory, dismiss]);
 
   function handleSave() {
     if (!name.trim()) return;
@@ -84,56 +175,86 @@ function CategoryModalInner({ onClose, rootCategories, editCategory }: Props) {
 
   const saving = fetcher.state !== "idle";
   const errors = fetcher.data?.errors ?? {};
+  const options = buildSelectOptions(allCategories, editCategory?.id);
+
+  const selectedParentLabel = options.find(o => String(o.id) === parentId)?.label;
 
   return (
-    <s-modal
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ref={modalRef as any}
-      heading={editCategory ? "Edit category" : "Add category"}
-    >
-      <s-stack direction="block" gap="base">
-        <s-text-field
-          label="Name"
-          value={name}
-          onInput={(e: Event) => setName((e.currentTarget as HTMLInputElement).value)}
-          required
-          error={errors.name}
-        />
+    <dialog ref={dialogRef} className="app-modal" style={dialogStyle}>
+      <div style={headerStyle}>
+        <span style={{ fontSize: "16px", fontWeight: 600, color: "#202223" }}>
+          {editCategory ? "Edit category" : "Add category"}
+        </span>
+        <button onClick={dismiss} aria-label="Close" style={closeBtnStyle}>✕</button>
+      </div>
 
-        <s-select
-          label="Parent category"
-          value={parentId}
-          onChange={(e: Event) =>
-            setParentId((e.currentTarget as HTMLSelectElement).value)
-          }
-        >
-          <s-option value="">— No parent (root) —</s-option>
-          {rootCategories
-            .filter((c) => !editCategory || c.id !== editCategory.id)
-            .map((c) => (
-              <s-option key={c.id} value={String(c.id)}>
-                {c.name}
-              </s-option>
-            ))}
-        </s-select>
-
-        <div>
-          <s-text>Category image (optional)</s-text>
-          <FileUpload
-            label="Category image"
-            accept="image/*"
-            onComplete={setImageUrl}
-            currentUrl={imageUrl || undefined}
+      <div style={{ padding: "20px" }}>
+        <s-stack direction="block" gap="base">
+          <s-text-field
+            label="Name"
+            value={name}
+            onInput={(e: Event) => setName((e.currentTarget as HTMLInputElement).value)}
+            required
+            error={errors.name}
           />
-        </div>
-      </s-stack>
 
-      <s-button slot="primary-action" variant="primary" loading={saving} onClick={handleSave}>
-        Save
-      </s-button>
-      <s-button slot="secondary-actions" onClick={dismiss} disabled={saving}>
-        Cancel
-      </s-button>
-    </s-modal>
+          {/* Parent selector — shows full hierarchy with depth prefix */}
+          <div>
+            <div style={{ fontSize: "13px", fontWeight: 500, color: "#202223", marginBottom: "6px" }}>
+              Parent category
+            </div>
+            {parentId && selectedParentLabel && (
+              <div style={{
+                fontSize: "12px",
+                color: "#6d7175",
+                background: "#f6f6f7",
+                border: "1px solid #e1e3e5",
+                borderRadius: "4px",
+                padding: "4px 8px",
+                marginBottom: "6px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}>
+                <span>📂</span>
+                <span>{selectedParentLabel}</span>
+              </div>
+            )}
+            <s-select
+              value={parentId}
+              onChange={(e: Event) =>
+                setParentId((e.currentTarget as HTMLSelectElement).value)
+              }
+            >
+              <s-option value="">— No parent (root category)</s-option>
+              {options.map((opt) => (
+                <s-option key={opt.id} value={String(opt.id)}>
+                  {opt.label}
+                </s-option>
+              ))}
+            </s-select>
+          </div>
+
+          <div>
+            <s-text>Category image (optional)</s-text>
+            <FileUpload
+              label="Category image"
+              accept="image/*"
+              onComplete={setImageUrl}
+              currentUrl={imageUrl || undefined}
+            />
+          </div>
+        </s-stack>
+      </div>
+
+      <div style={footerStyle}>
+        <s-button variant="secondary" onClick={dismiss} disabled={saving}>
+          Cancel
+        </s-button>
+        <s-button variant="primary" loading={saving} onClick={handleSave}>
+          Save
+        </s-button>
+      </div>
+    </dialog>
   );
 }
