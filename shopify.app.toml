@@ -9,7 +9,7 @@ embedded = true
 automatically_update_urls_on_dev = true
 
 [app_proxy]
-url = "https://pacific-expression-production-13f6.up.railway.app/proxy"
+url = "https://pacific-expression-production-13f6.up.railway.app/proxy/diagram"
 subpath = "diagram"
 prefix = "apps"
 # Storefront URL: yourstore.myshopify.com/apps/diagram
