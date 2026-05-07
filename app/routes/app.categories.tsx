@@ -436,7 +436,7 @@ export default function CategoriesPage() {
 
   useEffect(() => {
     if (!successMessage) return;
-    const t = setTimeout(() => setSuccessMessage(""), 4000);
+    const t = setTimeout(() => setSuccessMessage(""), 6000);
     return () => clearTimeout(t);
   }, [successMessage]);
 

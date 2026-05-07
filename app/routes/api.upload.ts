@@ -65,7 +65,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           {
             filename,
             mimeType,
-            resource: isImage ? "IMAGE" : "GENERIC_FILE",
+            resource: isImage ? "IMAGE" : "FILE",
             fileSize: String(fileSize),
           },
         ],
