@@ -13,11 +13,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   const search = url.searchParams.get("search") ?? "";
   const categoryId = url.searchParams.get("categoryId") ?? "";
+  const categoryIdNum = parseInt(categoryId, 10);
   const page = Math.max(1, Number(url.searchParams.get("page") ?? "1"));
 
   const where = {
     ...(search ? { title: { contains: search, mode: "insensitive" as const } } : {}),
-    ...(categoryId ? { categories: { some: { categoryId: Number(categoryId) } } } : {}),
+    ...(categoryId !== "" && !isNaN(categoryIdNum) && categoryIdNum > 0
+      ? { categories: { some: { categoryId: categoryIdNum } } }
+      : {}),
   };
 
   const [diagrams, total, categories] = await Promise.all([
@@ -166,6 +169,22 @@ export default function DiagramsPage() {
     successParam === "created" ? "Diagram created successfully." :
     successParam === "updated" ? "Diagram updated successfully." : "";
 
+  // Capture the message at mount time — never changes even after we strip the URL param
+  const initialMsg = useRef(successMessage).current;
+  const [showBanner, setShowBanner] = useState(!!initialMsg);
+
+  useEffect(() => {
+    if (!initialMsg) return;
+    // Strip ?success= from URL so a page refresh doesn't re-show the banner
+    const params = new URLSearchParams(window.location.search);
+    params.delete("success");
+    navigate({ search: params.toString() }, { replace: true });
+    // Auto-dismiss after 5 seconds
+    const timer = setTimeout(() => setShowBanner(false), 5000);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // empty deps — intentionally runs once on mount only
+
   function updateParam(key: string, value: string) {
     const params = new URLSearchParams(searchParams);
     if (value) {
@@ -216,9 +235,9 @@ export default function DiagramsPage() {
       </s-button>
 
       <s-section>
-        {successMessage && (
+        {showBanner && initialMsg && (
           <div style={{ marginBottom: "16px" }}>
-            <s-banner tone="success">{successMessage}</s-banner>
+            <s-banner tone="success">{initialMsg}</s-banner>
           </div>
         )}
 
@@ -234,9 +253,10 @@ export default function DiagramsPage() {
           <s-select
             label="Category"
             value={categoryId}
-            onChange={(e: Event) =>
-              updateParam("categoryId", (e.currentTarget as HTMLSelectElement).value)
-            }
+            onChange={(e: Event) => {
+              const val = (e.target as HTMLSelectElement)?.value ?? "";
+              updateParam("categoryId", val);
+            }}
           >
             <s-option value="">All categories</s-option>
             {categories.map((c) => (
@@ -245,6 +265,13 @@ export default function DiagramsPage() {
               </s-option>
             ))}
           </s-select>
+          {categoryId && (
+            <div style={{ alignSelf: "flex-end" }}>
+              <s-button variant="tertiary" onClick={() => updateParam("categoryId", "")}>
+                Clear filter
+              </s-button>
+            </div>
+          )}
           {selected.length > 0 && (
             <s-button variant="secondary" tone="critical" onClick={() => setBulkModalOpen(true)}>
               Delete selected ({selected.length})
