@@ -229,6 +229,12 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   .dp-pdf a:hover{background:#1e40af}
   .dp-empty{text-align:center;padding:48px 20px;color:#6b7280}
 
+  /* toast */
+  .dp-toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%) translateY(12px);padding:13px 22px;border-radius:9px;font-size:0.88rem;font-weight:600;color:#fff;opacity:0;transition:opacity 0.22s,transform 0.22s;z-index:99999;pointer-events:none;max-width:380px;width:max-content;text-align:center;line-height:1.4;box-shadow:0 4px 18px rgba(0,0,0,0.22)}
+  .dp-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .dp-toast.success{background:#16a34a}
+  .dp-toast.error{background:#dc2626}
+
   @media(max-width:640px){
     .dp{padding:16px 12px}
     .dp-hd h1{font-size:1.2rem}
@@ -351,6 +357,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   </div>
 </div>
 
+<div class="dp-toast" id="dp-toast"></div>
+
 <script>
 (function() {
   var PAGE_SIZE = ${PAGE_SIZE};
@@ -414,9 +422,23 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     });
   }
 
+  /* ── Toast ───────────────────────────────────────────────────── */
+  var toastTimer;
+  function showToast(msg, type) {
+    var t = document.getElementById('dp-toast');
+    if (!t) return;
+    t.textContent = msg;
+    t.className = 'dp-toast ' + (type || 'success');
+    clearTimeout(toastTimer);
+    /* force reflow so transition fires even if already showing */
+    void t.offsetWidth;
+    t.classList.add('show');
+    toastTimer = setTimeout(function() { t.classList.remove('show'); }, 4000);
+  }
+
   /* ── Add to cart ─────────────────────────────────────────────── */
-  function updateThemeCartCount(count) {
-    /* covers Dawn, Debut, Horizon and most popular themes */
+  function refreshCart(itemCount) {
+    /* 1. update every cart-count badge in the header */
     var selectors = [
       '[data-cart-count]','[data-cart-item-count]',
       '.cart-count','#CartCount',
@@ -425,15 +447,33 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     ];
     selectors.forEach(function(sel) {
       document.querySelectorAll(sel).forEach(function(el) {
-        el.textContent = String(count);
-        el.setAttribute('aria-label', count + ' items');
-        /* show bubble if it was hidden */
-        el.closest('[class*="bubble"],[class*="badge"]')
-          ?.classList.remove('hidden','is-empty','cart-count--empty');
+        el.textContent = String(itemCount);
+        el.setAttribute('aria-label', itemCount + ' items');
+        var bubble = el.closest('[class*="bubble"],[class*="badge"]');
+        if (bubble) bubble.classList.remove('hidden','is-empty','cart-count--empty');
       });
     });
-    /* fire events that themes like Dawn / Impulse listen to */
-    document.dispatchEvent(new CustomEvent('cart:updated', { detail: { item_count: count } }));
+
+    /* 2. Shopify Section Rendering API — refreshes cart drawer/bubble in
+          Dawn, Horizon, Impulse, and most modern themes */
+    fetch('/?sections=cart-icon-bubble,cart-drawer,cart-notification', {
+      headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(sections) {
+      Object.keys(sections).forEach(function(id) {
+        var el = document.getElementById('shopify-section-' + id);
+        if (!el) return;
+        var tmp = document.createElement('div');
+        tmp.innerHTML = sections[id];
+        var inner = tmp.querySelector('[id="shopify-section-' + id + '"]') || tmp.firstElementChild;
+        if (inner) el.replaceWith(inner);
+      });
+    })
+    .catch(function() {});
+
+    /* 3. fire events that themes listen to */
+    document.dispatchEvent(new CustomEvent('cart:updated', { bubbles: true, detail: { item_count: itemCount } }));
     document.dispatchEvent(new CustomEvent('cart:refresh', { bubbles: true }));
   }
 
@@ -464,11 +504,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         })
         .then(function() {
           btn.innerHTML = '&#10003; Added!';
-          /* fetch current cart to update theme header count */
           fetch('/cart.js', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
             .then(function(r) { return r.json(); })
-            .then(function(cart) { updateThemeCartCount(cart.item_count); })
+            .then(function(cart) { refreshCart(cart.item_count); })
             .catch(function() {});
+          showToast('Item added to cart!', 'success');
           setTimeout(function() {
             btn.innerHTML = originalHtml;
             btn.disabled = false;
@@ -476,11 +516,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         })
         .catch(function(err) {
           console.error('[diagram] add to cart error:', err.message);
-          btn.innerHTML = '&#9888; ' + (err.message || 'Error');
-          setTimeout(function() {
-            btn.innerHTML = originalHtml;
-            btn.disabled = false;
-          }, 3000);
+          showToast(err.message || 'Could not add item to cart', 'error');
+          btn.innerHTML = originalHtml;
+          btn.disabled = false;
         });
       });
     });
