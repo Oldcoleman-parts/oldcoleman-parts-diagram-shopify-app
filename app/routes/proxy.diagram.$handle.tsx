@@ -43,7 +43,7 @@ const icoInfo  = `<svg width="14" height="14" viewBox="0 0 20 20" fill="currentC
 const icoCheck = `<svg width="11" height="11" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M16.707 5.293a1 1 0 0 1 0 1.414l-8 8a1 1 0 0 1-1.414 0l-4-4a1 1 0 0 1 1.414-1.414L8 12.586l7.293-7.293a1 1 0 0 1 1.414 0z"/></svg>`;
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { storefront } = await authenticate.public.appProxy(request);
+  await authenticate.public.appProxy(request);
 
   const allCategories = await db.category.findMany({ orderBy: { name: "asc" } });
 
@@ -62,36 +62,6 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       status: 404,
       headers: { "Content-Type": "application/liquid" },
     });
-  }
-
-  /* ─── variant availability from Storefront API ─────────────── */
-  const availMap = new Map<string, boolean>();
-  if (storefront && diagram.products.length > 0) {
-    try {
-      const gids = diagram.products.map((p) =>
-        p.variantId.startsWith("gid://") ? p.variantId : `gid://shopify/ProductVariant/${p.variantId}`
-      );
-      const availRes = await storefront.graphql(
-        `query variantAvailability($ids: [ID!]!) {
-          nodes(ids: $ids) {
-            ... on ProductVariant {
-              id
-              availableForSale
-            }
-          }
-        }`,
-        { variables: { ids: gids } }
-      );
-      const availData = await availRes.json();
-      for (const node of (availData.data?.nodes ?? [])) {
-        if (node?.id) {
-          const numId = node.id.split("/").pop() ?? "";
-          availMap.set(numId, node.availableForSale ?? false);
-        }
-      }
-    } catch {
-      // availability fetch failed — rows will show no stock badge
-    }
   }
 
   const categoryIds = diagram.categories.map((dc) => dc.categoryId);
@@ -122,33 +92,22 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     </div>`).join("");
 
   /* ─── parts table rows ──────────────────────────────────────── */
-  const icoX = `<svg width="11" height="11" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M4.293 4.293a1 1 0 0 1 1.414 0L10 8.586l4.293-4.293a1 1 0 1 1 1.414 1.414L11.414 10l4.293 4.293a1 1 0 0 1-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 0 1-1.414-1.414L8.586 10 4.293 5.707a1 1 0 0 1 0-1.414z"/></svg>`;
-  const partRows = diagram.products.map((p, i) => {
-    const numId = p.variantId.startsWith("gid://") ? (p.variantId.split("/").pop() ?? p.variantId) : p.variantId;
-    const avail = availMap.size > 0 ? (availMap.get(numId) ?? false) : null;
-    const stockBadge = avail === null
-      ? ""
-      : avail
-        ? `<span class="dp-stock">${icoCheck} In Stock</span>`
-        : `<span class="dp-stock dp-stock--out">${icoX} Out of Stock</span>`;
-    const addBtn = avail === false
-      ? `<button class="dp-add-btn dp-add-btn--unavail" disabled type="button">Unavailable</button>`
-      : `<button class="dp-add-btn" data-variant-id="${esc(p.variantId)}" type="button">${icoCart} Add</button>`;
-    return `
-    <tr class="dp-row" data-index="${i}" data-img="${esc(p.productImageUrl ?? "")}" data-pid="${esc(p.productId)}">
+  const partRows = diagram.products.map((p, i) => `
+    <tr class="dp-row" data-index="${i}" data-img="${esc(p.productImageUrl ?? "")}" data-pid="${esc(p.productId)}" data-handle="${esc(p.productHandle)}" data-variant="${esc(p.variantId)}">
       <td class="dp-td-num"><span class="dp-num">${i + 1}</span></td>
       <td class="dp-td-partno"><a class="dp-partno" href="/products/${esc(p.productHandle)}">${esc(extractPartNo(p.productHandle))}</a></td>
       <td class="dp-td-desc">
         <span class="dp-desc">${esc(p.productTitle)}</span>
-        ${stockBadge}
+        <span class="dp-stock"></span>
       </td>
       <td class="dp-td-price">${p.productPrice ? `<span class="dp-price">$${esc(p.productPrice)}</span>` : `<span class="dp-price-na">—</span>`}</td>
       <td class="dp-td-action">
-        ${addBtn}
+        <button class="dp-add-btn" data-variant-id="${esc(p.variantId)}" type="button">
+          ${icoCart} Add
+        </button>
         <a class="dp-chevbtn" href="/products/${esc(p.productHandle)}">${icoChevR}</a>
       </td>
-    </tr>`;
-  }).join("");
+    </tr>`).join("");
 
   /* ─── other diagram pills ───────────────────────────────────── */
   const otherPills = relatedDiagrams.length > 0
@@ -600,6 +559,55 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
   bindRows();
   bindCartBtns();
+
+  /* ── Availability (Storefront AJAX API — no auth needed) ─────── */
+  (function loadAvailability() {
+    var ICO_CHECK = '${icoCheck}';
+    var ICO_X = '<svg width="11" height="11" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M4.293 4.293a1 1 0 0 1 1.414 0L10 8.586l4.293-4.293a1 1 0 1 1 1.414 1.414L11.414 10l4.293 4.293a1 1 0 0 1-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 0 1-1.414-1.414L8.586 10 4.293 5.707a1 1 0 0 1 0-1.414z"/></svg>';
+
+    var byHandle = {};
+    document.querySelectorAll('.dp-row[data-handle]').forEach(function(row) {
+      var h = row.dataset.handle;
+      if (!byHandle[h]) byHandle[h] = [];
+      byHandle[h].push(row);
+    });
+
+    Object.keys(byHandle).forEach(function(handle) {
+      fetch('/products/' + handle + '.js')
+        .then(function(r) { return r.ok ? r.json() : Promise.reject(); })
+        .then(function(product) {
+          byHandle[handle].forEach(function(row) {
+            var variantId = row.dataset.variant;
+            var variant = (product.variants || []).find(function(v) {
+              return String(v.id) === variantId;
+            });
+            var available = variant ? variant.available : false;
+
+            var badge = row.querySelector('.dp-stock');
+            if (badge) {
+              if (available) {
+                badge.className = 'dp-stock';
+                badge.innerHTML = ICO_CHECK + ' In Stock';
+              } else {
+                badge.className = 'dp-stock dp-stock--out';
+                badge.innerHTML = ICO_X + ' Out of Stock';
+              }
+            }
+
+            if (!available) {
+              var btn = row.querySelector('.dp-add-btn');
+              if (btn) {
+                btn.disabled = true;
+                btn.classList.add('dp-add-btn--unavail');
+                btn.innerHTML = 'Unavailable';
+                btn.removeAttribute('data-variant-id');
+              }
+            }
+          });
+        })
+        .catch(function() { /* leave badge empty on failure */ });
+    });
+  })();
 })();
 </script>
 </div>
