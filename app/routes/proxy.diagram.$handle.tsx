@@ -43,7 +43,7 @@ const icoInfo  = `<svg width="14" height="14" viewBox="0 0 20 20" fill="currentC
 const icoCheck = `<svg width="11" height="11" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M16.707 5.293a1 1 0 0 1 0 1.414l-8 8a1 1 0 0 1-1.414 0l-4-4a1 1 0 0 1 1.414-1.414L8 12.586l7.293-7.293a1 1 0 0 1 1.414 0z"/></svg>`;
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  await authenticate.public.appProxy(request);
+  const { storefront } = await authenticate.public.appProxy(request);
 
   const allCategories = await db.category.findMany({ orderBy: { name: "asc" } });
 
@@ -62,6 +62,36 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       status: 404,
       headers: { "Content-Type": "application/liquid" },
     });
+  }
+
+  /* ─── variant availability from Storefront API ─────────────── */
+  const availMap = new Map<string, boolean>();
+  if (storefront && diagram.products.length > 0) {
+    try {
+      const gids = diagram.products.map((p) =>
+        p.variantId.startsWith("gid://") ? p.variantId : `gid://shopify/ProductVariant/${p.variantId}`
+      );
+      const availRes = await storefront.graphql(
+        `query variantAvailability($ids: [ID!]!) {
+          nodes(ids: $ids) {
+            ... on ProductVariant {
+              id
+              availableForSale
+            }
+          }
+        }`,
+        { variables: { ids: gids } }
+      );
+      const availData = await availRes.json();
+      for (const node of (availData.data?.nodes ?? [])) {
+        if (node?.id) {
+          const numId = node.id.split("/").pop() ?? "";
+          availMap.set(numId, node.availableForSale ?? false);
+        }
+      }
+    } catch {
+      // availability fetch failed — rows will show no stock badge
+    }
   }
 
   const categoryIds = diagram.categories.map((dc) => dc.categoryId);
@@ -92,22 +122,33 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     </div>`).join("");
 
   /* ─── parts table rows ──────────────────────────────────────── */
-  const partRows = diagram.products.map((p, i) => `
+  const icoX = `<svg width="11" height="11" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M4.293 4.293a1 1 0 0 1 1.414 0L10 8.586l4.293-4.293a1 1 0 1 1 1.414 1.414L11.414 10l4.293 4.293a1 1 0 0 1-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 0 1-1.414-1.414L8.586 10 4.293 5.707a1 1 0 0 1 0-1.414z"/></svg>`;
+  const partRows = diagram.products.map((p, i) => {
+    const numId = p.variantId.startsWith("gid://") ? (p.variantId.split("/").pop() ?? p.variantId) : p.variantId;
+    const avail = availMap.size > 0 ? (availMap.get(numId) ?? false) : null;
+    const stockBadge = avail === null
+      ? ""
+      : avail
+        ? `<span class="dp-stock">${icoCheck} In Stock</span>`
+        : `<span class="dp-stock dp-stock--out">${icoX} Out of Stock</span>`;
+    const addBtn = avail === false
+      ? `<button class="dp-add-btn dp-add-btn--unavail" disabled type="button">Unavailable</button>`
+      : `<button class="dp-add-btn" data-variant-id="${esc(p.variantId)}" type="button">${icoCart} Add</button>`;
+    return `
     <tr class="dp-row" data-index="${i}" data-img="${esc(p.productImageUrl ?? "")}" data-pid="${esc(p.productId)}">
       <td class="dp-td-num"><span class="dp-num">${i + 1}</span></td>
       <td class="dp-td-partno"><a class="dp-partno" href="/products/${esc(p.productHandle)}">${esc(extractPartNo(p.productHandle))}</a></td>
       <td class="dp-td-desc">
         <span class="dp-desc">${esc(p.productTitle)}</span>
-        <span class="dp-stock">${icoCheck} In Stock</span>
+        ${stockBadge}
       </td>
       <td class="dp-td-price">${p.productPrice ? `<span class="dp-price">$${esc(p.productPrice)}</span>` : `<span class="dp-price-na">—</span>`}</td>
       <td class="dp-td-action">
-        <button class="dp-add-btn" data-variant-id="${esc(p.variantId)}" type="button">
-          ${icoCart} Add
-        </button>
+        ${addBtn}
         <a class="dp-chevbtn" href="/products/${esc(p.productHandle)}">${icoChevR}</a>
       </td>
-    </tr>`).join("");
+    </tr>`;
+  }).join("");
 
   /* ─── other diagram pills ───────────────────────────────────── */
   const otherPills = relatedDiagrams.length > 0
@@ -200,6 +241,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   .dp-td-desc{padding:11px 6px;vertical-align:middle;overflow:hidden}
   .dp-desc{display:block;color:#111827;line-height:1.35;margin-bottom:3px;font-size:0.82rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .dp-stock{display:inline-flex;align-items:center;gap:3px;font-size:0.7rem;color:#16a34a;font-weight:500}
+  .dp-stock--out{color:#9ca3af}
+  .dp-add-btn--unavail{background:#e5e7eb;color:#9ca3af;cursor:default}
   .dp-td-price{padding:11px 6px;white-space:nowrap;vertical-align:middle;overflow:hidden}
   .dp-price{font-weight:700;color:#111827;font-size:0.88rem}
   .dp-price-na{color:#9ca3af}
@@ -230,8 +273,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   .dp-empty{text-align:center;padding:48px 20px;color:#6b7280}
 
   /* toast */
-  .dp-toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%) translateY(12px);padding:13px 22px;border-radius:9px;font-size:0.88rem;font-weight:600;color:#fff;opacity:0;transition:opacity 0.22s,transform 0.22s;z-index:99999;pointer-events:none;max-width:380px;width:max-content;text-align:center;line-height:1.4;box-shadow:0 4px 18px rgba(0,0,0,0.22)}
-  .dp-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .dp-toast{position:fixed;top:24px;right:24px;transform:translateY(-10px);padding:13px 22px;border-radius:9px;font-size:0.88rem;font-weight:600;color:#fff;opacity:0;transition:opacity 0.22s,transform 0.22s;z-index:99999;pointer-events:none;max-width:340px;text-align:left;line-height:1.4;box-shadow:0 4px 18px rgba(0,0,0,0.22)}
+  .dp-toast.show{opacity:1;transform:translateY(0)}
   .dp-toast.success{background:#16a34a}
   .dp-toast.error{background:#dc2626}
 
