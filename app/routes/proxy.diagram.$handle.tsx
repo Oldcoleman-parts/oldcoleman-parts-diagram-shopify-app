@@ -525,44 +525,76 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         btn.innerHTML = 'Adding&hellip;';
 
         var vid = Number(variantId);
-        var promise;
+        var root = (window.Shopify && window.Shopify.routes && window.Shopify.routes.root) || '/';
 
-        if (window.__themeSliderAddToCart) {
-          /* Theme-native path: fires CartAddEvent + section re-rendering, which
-             updates the cart drawer and header count automatically. */
-          promise = window.__themeSliderAddToCart(vid);
-        } else {
-          /* Generic fallback for themes without the helper */
-          var root = (window.Shopify && window.Shopify.routes && window.Shopify.routes.root) || '/';
-          promise = fetch(root + 'cart/add.js', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-            body: JSON.stringify({ items: [{ id: vid, quantity: 1 }] })
-          })
-          .then(function(r) {
-            if (!r.ok) return r.json().then(function(e) { throw new Error(e.description || e.message || 'Add to cart failed'); });
-            return r.json();
-          })
-          .then(function() {
+        /* Collect section IDs for Section Rendering API.
+           sections_url MUST be '/' (not window.location.pathname) because this
+           page is an App Proxy route — Shopify cannot render theme sections for
+           App Proxy URLs, so data.sections would come back empty and the cart
+           drawer would open showing stale content. */
+        var sIds = [];
+        var cdEl = document.querySelector('cart-drawer-component');
+        var csEl = cdEl ? cdEl.closest('[id^="shopify-section-"]') : null;
+        if (csEl) sIds.push(csEl.id.replace('shopify-section-', ''));
+        document.querySelectorAll('[id^="shopify-section-header"]').forEach(function(el) {
+          var id = el.id.replace('shopify-section-', '');
+          if (id && sIds.indexOf(id) === -1) sIds.push(id);
+        });
+
+        var reqBody = { items: [{ id: vid, quantity: 1 }] };
+        if (sIds.length) { reqBody.sections = sIds.join(','); reqBody.sections_url = '/'; }
+
+        fetch(root + 'cart/add.js', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify(reqBody)
+        })
+        .then(function(r) {
+          if (!r.ok) return r.json().then(function(e) { throw new Error(e.description || e.message || 'Add to cart failed'); });
+          return r.json();
+        })
+        .then(function(data) {
+          btn.innerHTML = '&#10003; Added!';
+          showToast('Item added to cart!', 'success');
+
+          /* Apply section re-rendering from the response (updates cart drawer
+             content and header count badge with the newly added item). */
+          var sectionsApplied = false;
+          if (data.sections) {
+            Object.keys(data.sections).forEach(function(id) {
+              var el = document.getElementById('shopify-section-' + id);
+              if (!el) return;
+              var tmp = document.createElement('div');
+              tmp.innerHTML = data.sections[id];
+              var inner = tmp.querySelector('[id="shopify-section-' + id + '"]') || tmp.firstElementChild;
+              if (inner) { el.replaceWith(inner); sectionsApplied = true; }
+            });
+          }
+
+          /* Open the cart drawer — re-query after DOM replacement */
+          setTimeout(function() {
+            try {
+              var drawer = document.querySelector('cart-drawer-component');
+              if (drawer && typeof drawer.open === 'function') drawer.open();
+            } catch(e) {}
+          }, 50);
+
+          /* Fallback badge update when no sections were returned */
+          if (!sectionsApplied) {
             fetch(root + 'cart.js', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
               .then(function(r) { return r.json(); })
               .then(function(cart) { refreshCart(cart.item_count); })
               .catch(function() {});
-          });
-        }
+          }
 
-        promise
-          .then(function() {
-            btn.innerHTML = '&#10003; Added!';
-            showToast('Item added to cart!', 'success');
-            setTimeout(function() { btn.innerHTML = originalHtml; btn.disabled = false; }, 2200);
-          })
-          .catch(function(err) {
-            console.error('[diagram] add to cart error:', err && err.message);
-            showToast((err && err.message) || 'Could not add item to cart', 'error');
-            btn.innerHTML = originalHtml;
-            btn.disabled = false;
-          });
+          setTimeout(function() { btn.innerHTML = originalHtml; btn.disabled = false; }, 2200);
+        })
+        .catch(function(err) {
+          console.error('[diagram] add to cart error:', err && err.message);
+          showToast((err && err.message) || 'Could not add item to cart', 'error');
+          btn.innerHTML = originalHtml;
+          btn.disabled = false;
+        });
       });
     });
   }
