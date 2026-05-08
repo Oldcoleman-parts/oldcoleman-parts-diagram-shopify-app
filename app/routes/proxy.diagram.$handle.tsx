@@ -132,6 +132,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
   /* page header */
   .dp-hd{margin-bottom:22px}
+  .dp-back{display:inline-flex;align-items:center;gap:5px;font-size:0.82rem;font-weight:600;color:#4b5563;text-decoration:none;margin-bottom:10px;padding:4px 0;transition:color 0.12s}
+  .dp-back:hover{color:#1d4ed8}
+  .dp-back svg{flex-shrink:0}
   .dp-hd h1{font-size:1.55rem;font-weight:800;color:#111827;margin:0 0 5px;line-height:1.25}
   .dp-hd p{font-size:0.9rem;color:#6b7280;margin:0 0 12px;line-height:1.5}
   .dp-other{display:flex;align-items:center;flex-wrap:wrap;gap:7px;font-size:0.83rem;color:#6b7280}
@@ -246,6 +249,10 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
 <!-- page header -->
 <div class="dp-hd">
+  <a class="dp-back" href="${base}">
+    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M12.707 5.293a1 1 0 0 1 0 1.414L9.414 10l3.293 3.293a1 1 0 0 1-1.414 1.414l-4-4a1 1 0 0 1 0-1.414l4-4a1 1 0 0 1 1.414 0z"/></svg>
+    All Diagrams
+  </a>
   <h1>${esc(diagram.title)} &ndash; Exploded Diagram</h1>
   <p>Select the part you need from the list or gallery below.</p>
   <div class="dp-other">
@@ -442,10 +449,15 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   function refreshCart(itemCount) {
     /* 1. update every cart-count badge in the header */
     var selectors = [
-      '[data-cart-count]','[data-cart-item-count]',
+      '[data-cart-count]','[data-cart-item-count]','[data-item-count]',
       '.cart-count','#CartCount',
       '.header__cart-count','.cart-link__bubble-num',
-      '.cart-item-count','.icon-cart__item-count'
+      '.cart-item-count','.icon-cart__item-count',
+      '.cart__count','.js-cart-count',
+      '.CartCount','.site-header__cart-count',
+      '.cart-count-bubble span','[data-header-cart-quantity]',
+      '.navCart-count','.mini-cart__count',
+      '[ref="cartItemCount"]','cart-count'
     ];
     selectors.forEach(function(sel) {
       document.querySelectorAll(sel).forEach(function(el) {
@@ -456,9 +468,20 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       });
     });
 
+    /* show the bubble if it was hidden (cart was empty before) */
+    if (itemCount > 0) {
+      ['.cart-count-bubble','.header__cart-count-bubble','[data-cart-count-bubble]',
+       '.cart-badge','.cart-icon__bubble'].forEach(function(sel) {
+        document.querySelectorAll(sel).forEach(function(el) {
+          el.classList.remove('hidden','is-empty','cart-count--empty');
+          if (el.style.display === 'none') el.style.display = '';
+        });
+      });
+    }
+
     /* 2. Shopify Section Rendering API — refreshes cart drawer/bubble in
           Dawn, Horizon, Impulse, and most modern themes */
-    fetch('/?sections=cart-icon-bubble,cart-drawer,cart-notification', {
+    fetch('/?sections=cart-icon-bubble,cart-drawer,cart-notification,cart-notification-button,header', {
       headers: { 'X-Requested-With': 'XMLHttpRequest' }
     })
     .then(function(r) { return r.json(); })
@@ -474,9 +497,22 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     })
     .catch(function() {});
 
-    /* 3. fire events that themes listen to */
-    document.dispatchEvent(new CustomEvent('cart:updated', { bubbles: true, detail: { item_count: itemCount } }));
-    document.dispatchEvent(new CustomEvent('cart:refresh', { bubbles: true }));
+    /* 3. fire events that themes listen to (on both document and window) */
+    var detail = { item_count: itemCount, items_count: itemCount };
+    ['cart:updated','cart:refresh','cart:update','theme:cart:updated','CartUpdate'].forEach(function(name) {
+      document.dispatchEvent(new CustomEvent(name, { bubbles: true, detail: detail }));
+      window.dispatchEvent(new CustomEvent(name, { bubbles: true, detail: detail }));
+    });
+
+    /* 4. Debut / older themes expose a global CartCount object */
+    try { if (window.CartCount) window.CartCount.prototype.updateCount(itemCount); } catch(e) {}
+    /* 5. themes that expose a global cart object */
+    try { if (window.theme && window.theme.cart) window.theme.cart.getCart(); } catch(e) {}
+    /* 6. open cart drawer web component if present */
+    try {
+      var cd = document.querySelector('cart-drawer-component');
+      if (cd && typeof cd.open === 'function') cd.open();
+    } catch(e) {}
   }
 
   function bindCartBtns() {
@@ -488,40 +524,45 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         btn.disabled = true;
         btn.innerHTML = 'Adding&hellip;';
 
-        fetch('/cart/add.js', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Requested-With': 'XMLHttpRequest'
-          },
-          body: JSON.stringify({ items: [{ id: Number(variantId), quantity: 1 }] })
-        })
-        .then(function(r) {
-          if (!r.ok) {
-            return r.json().then(function(e) {
-              throw new Error(e.description || e.message || 'Add to cart failed');
-            });
-          }
-          return r.json();
-        })
-        .then(function() {
-          btn.innerHTML = '&#10003; Added!';
-          fetch('/cart.js', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-            .then(function(r) { return r.json(); })
-            .then(function(cart) { refreshCart(cart.item_count); })
-            .catch(function() {});
-          showToast('Item added to cart!', 'success');
-          setTimeout(function() {
+        var vid = Number(variantId);
+        var promise;
+
+        if (window.__themeSliderAddToCart) {
+          /* Theme-native path: fires CartAddEvent + section re-rendering, which
+             updates the cart drawer and header count automatically. */
+          promise = window.__themeSliderAddToCart(vid);
+        } else {
+          /* Generic fallback for themes without the helper */
+          var root = (window.Shopify && window.Shopify.routes && window.Shopify.routes.root) || '/';
+          promise = fetch(root + 'cart/add.js', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            body: JSON.stringify({ items: [{ id: vid, quantity: 1 }] })
+          })
+          .then(function(r) {
+            if (!r.ok) return r.json().then(function(e) { throw new Error(e.description || e.message || 'Add to cart failed'); });
+            return r.json();
+          })
+          .then(function() {
+            fetch(root + 'cart.js', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+              .then(function(r) { return r.json(); })
+              .then(function(cart) { refreshCart(cart.item_count); })
+              .catch(function() {});
+          });
+        }
+
+        promise
+          .then(function() {
+            btn.innerHTML = '&#10003; Added!';
+            showToast('Item added to cart!', 'success');
+            setTimeout(function() { btn.innerHTML = originalHtml; btn.disabled = false; }, 2200);
+          })
+          .catch(function(err) {
+            console.error('[diagram] add to cart error:', err && err.message);
+            showToast((err && err.message) || 'Could not add item to cart', 'error');
             btn.innerHTML = originalHtml;
             btn.disabled = false;
-          }, 2200);
-        })
-        .catch(function(err) {
-          console.error('[diagram] add to cart error:', err.message);
-          showToast(err.message || 'Could not add item to cart', 'error');
-          btn.innerHTML = originalHtml;
-          btn.disabled = false;
-        });
+          });
       });
     });
   }
