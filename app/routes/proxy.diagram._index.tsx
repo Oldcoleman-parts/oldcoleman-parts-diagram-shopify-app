@@ -153,71 +153,70 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 </a>`;
   }
 
-  /* ── tab HTML ─────────────────────────────────────────────────── */
-  function tabHtml(label: string, count: number, icon: string, active: boolean, href: string) {
-    return `<a href="${esc(href)}" class="dg-tab${active ? " active" : ""}">${icon} ${esc(label)} <span class="dg-tab-count">(${count})</span></a>`;
-  }
-
-  const tabs = [
-    tabHtml("All", totalCount, icoGrid, !catFilter, qp({})),
-    ...roots.map((r) =>
-      tabHtml(r.name, rootCounts.get(r.id) ?? 0, icoFolder, catFilter === r.id, qp({ cat: String(r.id) }))
-    ),
-  ].join("\n        ");
-
-  const seriesHtml = seriesOptions.length > 0 ? `
-      <div class="dg-series-wrap">
-        <span class="dg-filter-label">Series:</span>
-        <select class="dg-series-sel" onchange="location.href=this.value">
-          <option value="${esc(qp({ cat: String(catFilter) }))}">All Series</option>
-          ${seriesOptions.map((s) => {
-            const href = qp({ cat: String(catFilter), series: String(s.id) });
-            return `<option value="${esc(href)}"${serFilter === s.id ? " selected" : ""}>${esc(s.name)}</option>`;
-          }).join("")}
-        </select>
-      </div>` : "";
-
   const filteredCount = diagrams.length;
+
+  const activeFilterCount = (catFilter ? 1 : 0) + (serFilter ? 1 : 0);
+  const icoFilterSliders = `<svg width="15" height="15" viewBox="0 0 20 20" fill="currentColor"><path d="M3 5a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H4a1 1 0 0 1-1-1zm3 5a1 1 0 0 1 1-1h6a1 1 0 1 1 0 2H7a1 1 0 0 1-1-1zm2 5a1 1 0 0 1 1-1h2a1 1 0 1 1 0 2H9a1 1 0 0 1-1-1z"/></svg>`;
 
   const html = `
 <div class="dgl">
 <style>
   .dgl *,.dgl *::before,.dgl *::after{box-sizing:border-box}
-  .dgl{max-width:1200px;margin:0 auto;padding:28px 20px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#111827}
+  .dgl{width:100%;max-width:1260px;margin:0 auto;padding:28px 20px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#111827;background:#f2f0eb}
 
   /* header */
-  .dgl-head{margin-bottom:28px}
+  .dgl-head{margin-bottom:22px}
   .dgl-head h1{font-size:1.75rem;font-weight:800;color:#111827;margin:0 0 6px}
   .dgl-head p{color:#6b7280;margin:0;font-size:0.95rem;max-width:580px;line-height:1.5}
 
-  /* search + filter card */
-  .dgl-filter-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;margin-bottom:24px;box-shadow:0 1px 4px rgba(0,0,0,0.05)}
+  /* search card */
+  .dgl-search-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;margin-bottom:20px;box-shadow:0 1px 4px rgba(0,0,0,0.05)}
   .dgl-search-row{padding:14px 18px;display:flex;align-items:center;gap:10px}
   .dgl-search-input-wrap{flex:1;display:flex;align-items:center;gap:10px;background:#f9fafb;border:1.5px solid #e5e7eb;border-radius:10px;padding:9px 14px;transition:border-color 0.15s}
   .dgl-search-input-wrap:focus-within{border-color:#6366f1;background:#fff}
   .dgl-search-input-wrap input{flex:1;border:none;background:none;font-size:0.9rem;color:#111827;outline:none}
   .dgl-search-input-wrap input::placeholder{color:#9ca3af}
-  .dgl-search-btn{background:#111827;color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:0.87rem;font-weight:600;cursor:pointer;white-space:nowrap}
+  .dgl-search-btn{background:#111827;color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:0.87rem;font-weight:600;cursor:pointer;white-space:nowrap;font-family:inherit}
   .dgl-search-btn:hover{background:#1f2937}
-  .dgl-filter-bar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:12px 18px;border-top:1px solid #f3f4f6}
-  .dg-filter-label{font-size:0.82rem;color:#6b7280;white-space:nowrap;font-weight:500}
 
-  /* tabs */
-  .dg-tab{display:inline-flex;align-items:center;gap:5px;padding:6px 14px;border-radius:20px;border:1.5px solid #e5e7eb;background:#fff;color:#374151;font-size:0.82rem;font-weight:500;text-decoration:none;white-space:nowrap;transition:all 0.12s}
-  .dg-tab:hover{border-color:#6366f1;color:#6366f1;background:#f5f3ff}
-  .dg-tab.active{border-color:#6366f1;background:#6366f1;color:#fff;font-weight:600}
-  .dg-tab.active svg{fill:#fff}
-  .dg-tab-count{font-size:0.75rem;opacity:0.8}
-  .dg-series-wrap{display:flex;align-items:center;gap:7px;margin-left:4px}
-  .dg-series-sel{padding:6px 10px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:0.82rem;color:#374151;background:#fff;cursor:pointer;outline:none}
-  .dg-series-sel:focus{border-color:#6366f1}
+  /* mobile filter toggle */
+  .dgl-filter-toggle{display:none;align-items:center;gap:8px;padding:9px 16px;border:1.5px solid #e5e7eb;border-radius:8px;background:#fff;font-size:0.87rem;font-weight:600;color:#374151;cursor:pointer;margin-bottom:16px;font-family:inherit;transition:border-color 0.15s}
+  .dgl-filter-toggle:hover{border-color:#6366f1;color:#6366f1}
+  .dgl-filter-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;background:#6366f1;color:#fff;border-radius:10px;font-size:0.7rem;font-weight:700;padding:0 5px}
+
+  /* two-column layout */
+  .dgl-layout{display:grid;grid-template-columns:220px 1fr;gap:24px;align-items:start}
+
+  /* loading spinner */
+  .dgl-spinner{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:80px 0;color:#9ca3af;font-size:0.88rem}
+  .dgl-spinner-ring{width:38px;height:38px;border:3px solid #e5e7eb;border-top-color:#6366f1;border-radius:50%;animation:dgl-spin 0.65s linear infinite}
+  @keyframes dgl-spin{to{transform:rotate(360deg)}}
+
+  /* sidebar */
+  .dgl-sidebar{background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;position:sticky;top:20px}
+  .dgl-sidebar-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #f3f4f6}
+  .dgl-sidebar-title{font-size:0.78rem;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:0.06em;margin:0}
+  .dgl-clear-all{font-size:0.78rem;color:#6366f1;font-weight:600;text-decoration:none}
+  .dgl-clear-all:hover{text-decoration:underline}
+  .dgl-filter-group{padding:14px 16px}
+  .dgl-filter-group+.dgl-filter-group{border-top:1px solid #f3f4f6}
+  .dgl-filter-group-title{font-size:0.7rem;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.07em;margin:0 0 10px}
+  .dgl-cat-list,.dgl-ser-list{display:flex;flex-direction:column;gap:2px}
+  .dg-cat-link,.dg-ser-link{display:flex;align-items:center;gap:7px;padding:7px 10px;border-radius:8px;text-decoration:none;color:#374151;font-size:0.87rem;font-weight:500;transition:background 0.12s,color 0.12s}
+  .dg-cat-link:hover,.dg-ser-link:hover{background:#f5f3ff;color:#6366f1}
+  .dg-cat-link.active,.dg-ser-link.active{background:#6366f1;color:#fff;font-weight:600}
+  .dg-cat-count{margin-left:auto;font-size:0.72rem;background:#f3f4f6;color:#6b7280;padding:2px 7px;border-radius:10px;flex-shrink:0;font-weight:600;transition:background 0.12s,color 0.12s}
+  .dg-cat-link.active .dg-cat-count,.dg-ser-link.active .dg-cat-count{background:rgba(255,255,255,0.22);color:#fff}
+  .dg-ser-link{font-size:0.84rem;padding-left:14px}
 
   /* results meta */
-  .dgl-meta{font-size:0.85rem;color:#6b7280;margin-bottom:18px}
+  .dgl-meta{font-size:0.85rem;color:#6b7280;margin-bottom:18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
   .dgl-meta strong{color:#111827;font-weight:600}
+  .dgl-meta-clear{font-size:0.8rem;color:#6b7280;text-decoration:none;display:inline-flex;align-items:center;gap:3px}
+  .dgl-meta-clear:hover{color:#6366f1}
 
   /* grid */
-  .dgl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:20px}
+  .dgl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:18px}
 
   /* card */
   .dg-card{display:flex;flex-direction:column;background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;text-decoration:none;color:inherit;transition:box-shadow 0.15s,transform 0.15s,border-color 0.15s}
@@ -242,11 +241,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   .dgl-empty p{margin:0 0 14px;font-size:0.9rem}
   .dgl-empty a{color:#6366f1;font-weight:600;text-decoration:none}
 
-  @media(max-width:640px){
+  @media(max-width:860px){
+    .dgl-layout{grid-template-columns:190px 1fr}
+  }
+  @media(max-width:680px){
     .dgl{padding:20px 14px}
     .dgl-head h1{font-size:1.4rem}
-    .dgl-grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px}
-    .dgl-filter-bar{gap:6px}
+    .dgl-layout{grid-template-columns:1fr}
+    .dgl-sidebar{position:static;display:none}
+    .dgl-sidebar.is-open{display:block}
+    .dgl-filter-toggle{display:inline-flex}
+    .dgl-grid{grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:13px}
   }
 </style>
 
@@ -255,8 +260,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   <p>Browse all available diagrams. Select a diagram to view the exploded parts list and order components.</p>
 </div>
 
-<div class="dgl-filter-card">
-  <form class="dgl-search-row" method="GET" action="${esc(base)}">
+<!-- Search bar — stays at the top -->
+<div class="dgl-search-card">
+  <form class="dgl-search-row js-dgl-search-form" method="GET" action="${esc(base)}">
     ${catFilter ? `<input type="hidden" name="cat" value="${catFilter}" />` : ""}
     ${serFilter ? `<input type="hidden" name="series" value="${serFilter}" />` : ""}
     <div class="dgl-search-input-wrap">
@@ -271,30 +277,170 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     </div>
     <button class="dgl-search-btn" type="submit">Search</button>
   </form>
-  <div class="dgl-filter-bar">
-    <span class="dg-filter-label">Filter by:</span>
-    ${tabs}
-    ${seriesHtml}
-    ${search ? `<a href="${esc(qp({ q: "" }))}" style="font-size:0.8rem;color:#6b7280;text-decoration:none;margin-left:4px">✕ Clear search</a>` : ""}
-  </div>
 </div>
 
-<p class="dgl-meta">
-  Showing <strong>${filteredCount}</strong>${filteredCount !== totalCount ? ` of <strong>${totalCount}</strong>` : ""} diagram${totalCount !== 1 ? "s" : ""}
-</p>
+<!-- Mobile: show/hide sidebar toggle -->
+<button class="dgl-filter-toggle js-dgl-filter-toggle" type="button">
+  ${icoFilterSliders}
+  Filters
+  ${activeFilterCount > 0 ? `<span class="dgl-filter-badge">${activeFilterCount}</span>` : ""}
+</button>
 
-${filteredCount === 0 ? `
-  <div class="dgl-empty">
-    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" stroke-width="1.5" style="margin-bottom:12px"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-    <h3>${search ? `No diagrams found for &ldquo;${esc(search)}&rdquo;` : "No diagrams available yet."}</h3>
-    <p>${search ? "Try a different search term or clear the filters." : "Check back soon."}</p>
-    ${search || catFilter ? `<a href="${esc(base)}">View all diagrams</a>` : ""}
+<div class="dgl-layout js-dgl-layout">
+
+  <!-- LEFT: filter sidebar -->
+  <aside class="dgl-sidebar js-dgl-sidebar">
+    <div class="dgl-sidebar-head">
+      <span class="dgl-sidebar-title">Filters</span>
+      ${(catFilter || serFilter || search) ? `<a href="${esc(base)}" class="dgl-clear-all">Clear all</a>` : ""}
+    </div>
+
+    <!-- Category filter -->
+    <div class="dgl-filter-group">
+      <p class="dgl-filter-group-title">Category</p>
+      <div class="dgl-cat-list">
+        <a href="${esc(qp({}))}" class="dg-cat-link${!catFilter ? " active" : ""}">
+          ${icoGrid} All
+          <span class="dg-cat-count">${totalCount}</span>
+        </a>
+        ${roots.map((r) => `
+        <a href="${esc(qp({ cat: String(r.id) }))}" class="dg-cat-link${catFilter === r.id ? " active" : ""}">
+          ${icoFolder} ${esc(r.name)}
+          <span class="dg-cat-count">${rootCounts.get(r.id) ?? 0}</span>
+        </a>`).join("")}
+      </div>
+    </div>
+
+    ${seriesOptions.length > 0 ? `
+    <!-- Series filter (only when a category is selected) -->
+    <div class="dgl-filter-group">
+      <p class="dgl-filter-group-title">Series</p>
+      <div class="dgl-ser-list">
+        <a href="${esc(qp({ cat: String(catFilter) }))}" class="dg-ser-link${!serFilter ? " active" : ""}">
+          All Series
+        </a>
+        ${seriesOptions.map((s) => `
+        <a href="${esc(qp({ cat: String(catFilter), series: String(s.id) }))}" class="dg-ser-link${serFilter === s.id ? " active" : ""}">
+          ${esc(s.name)}
+        </a>`).join("")}
+      </div>
+    </div>
+    ` : ""}
+  </aside>
+
+  <!-- RIGHT: results -->
+  <div class="dgl-content">
+    <p class="dgl-meta">
+      Showing <strong>${filteredCount}</strong>${filteredCount !== totalCount ? ` of <strong>${totalCount}</strong>` : ""} diagram${totalCount !== 1 ? "s" : ""}
+      ${search ? `<a href="${esc(qp({ q: "" }))}" class="dgl-meta-clear">&#x2715; Clear &ldquo;${esc(search)}&rdquo;</a>` : ""}
+    </p>
+
+    ${filteredCount === 0 ? `
+    <div class="dgl-empty">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" stroke-width="1.5" style="margin-bottom:12px"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <h3>${search ? `No diagrams found for &ldquo;${esc(search)}&rdquo;` : "No diagrams available yet."}</h3>
+      <p>${search ? "Try a different search term or clear the filters." : "Check back soon."}</p>
+      ${search || catFilter ? `<a href="${esc(base)}">View all diagrams</a>` : ""}
+    </div>
+    ` : `
+    <div class="dgl-grid">
+      ${diagrams.map(cardHtml).join("")}
+    </div>
+    `}
   </div>
-` : `
-  <div class="dgl-grid">
-    ${diagrams.map(cardHtml).join("")}
-  </div>
-`}
+
+</div>
+
+<script>
+(function() {
+  var APP_BASE = '${base}';
+
+  /* ── AJAX navigation ────────────────────────────────────────────
+     Swaps only the sidebar + content area (js-dgl-layout) and updates
+     the search form's hidden inputs so subsequent searches stay in sync.
+     Falls back to a full page load if anything goes wrong.             */
+  function navigate(url, pushState) {
+    var layout = document.querySelector('.js-dgl-layout');
+    if (!layout) { window.location.href = url; return; }
+
+    /* show spinner in the content area; sidebar stays fully visible */
+    var content = layout.querySelector('.dgl-content');
+    if (content) content.innerHTML = '<div class="dgl-spinner"><div class="dgl-spinner-ring"></div>Loading&hellip;</div>';
+
+    fetch(url, { headers: { Accept: 'text/html' } })
+      .then(function(r) { if (!r.ok) throw r; return r.text(); })
+      .then(function(html) {
+        var parser = new DOMParser();
+        var doc = parser.parseFromString(html, 'text/html');
+
+        /* swap sidebar + grid in one shot */
+        var newLayout = doc.querySelector('.js-dgl-layout');
+        if (!newLayout) throw new Error('missing layout');
+        document.querySelector('.js-dgl-layout').replaceWith(newLayout);
+
+        /* keep the search form's hidden inputs in sync so the next
+           search still carries the newly selected category/series     */
+        var newForm = doc.querySelector('.js-dgl-search-form');
+        var curForm = document.querySelector('.js-dgl-search-form');
+        if (newForm && curForm) {
+          curForm.querySelectorAll('input[type="hidden"]').forEach(function(el) { el.remove(); });
+          newForm.querySelectorAll('input[type="hidden"]').forEach(function(el) {
+            curForm.prepend(el.cloneNode(true));
+          });
+          /* also mirror the mobile filter badge count on the toggle button */
+          var newBadge = doc.querySelector('.js-dgl-filter-toggle');
+          var curBadge = document.querySelector('.js-dgl-filter-toggle');
+          if (newBadge && curBadge) curBadge.innerHTML = newBadge.innerHTML;
+        }
+
+        if (pushState !== false) history.pushState(null, '', url);
+        bindToggle();
+      })
+      .catch(function() { window.location.href = url; });
+  }
+
+  /* ── Mobile sidebar toggle ────────────────────────────────────── */
+  function bindToggle() {
+    var toggle  = document.querySelector('.js-dgl-filter-toggle');
+    var sidebar = document.querySelector('.js-dgl-sidebar');
+    if (toggle && sidebar) {
+      toggle.onclick = function() {
+        var open = sidebar.classList.toggle('is-open');
+        toggle.setAttribute('aria-expanded', String(open));
+      };
+    }
+  }
+
+  /* ── Intercept filter / clear links (not diagram card links) ──── */
+  document.querySelector('.dgl').addEventListener('click', function(e) {
+    var link = e.target.closest('a');
+    if (!link || link.closest('.dg-card')) return;
+    var href = link.getAttribute('href') || '';
+    if (!href.startsWith(APP_BASE) && !href.startsWith('?')) return;
+    e.preventDefault();
+    navigate(link.href);
+  });
+
+  /* ── Search form submit ───────────────────────────────────────── */
+  var form = document.querySelector('.js-dgl-search-form');
+  if (form) {
+    form.addEventListener('submit', function(e) {
+      e.preventDefault();
+      var fd = new FormData(form);
+      var p  = new URLSearchParams();
+      fd.forEach(function(v, k) { if (v) p.set(k, String(v)); });
+      navigate(APP_BASE + (p.toString() ? '?' + p.toString() : ''));
+    });
+  }
+
+  /* ── Browser back / forward ───────────────────────────────────── */
+  window.addEventListener('popstate', function() {
+    navigate(window.location.href, false);
+  });
+
+  bindToggle();
+})();
+</script>
 
 </div>
 `;
