@@ -128,7 +128,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 <div class="dp">
 <style>
   .dp *,.dp *::before,.dp *::after{box-sizing:border-box}
-  .dp{max-width:1200px;margin:0 auto;padding:28px 20px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1a1a1a;background:#f2f0eb}
+  .dp{max-width:1200px;margin:0 auto;padding:28px 20px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1a1a1a}
 
   /* page header */
   .dp-hd{margin-bottom:22px}
@@ -149,8 +149,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   @media(max-width:768px){.dp-body{grid-template-columns:1fr}}
 
   /* shared card */
-  .dp-card{background:#fff;border:1px solid #e2e0da;border-radius:10px;overflow:hidden}
-  .dp-card-hd{display:flex;align-items:center;justify-content:space-between;padding:11px 16px;border-bottom:1px solid #f0ede8;gap:8px;flex-wrap:wrap}
+  .dp-card{background:#fff;border:1px solid #e2e0da;border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)}
+  .dp-card-hd{display:flex;align-items:center;justify-content:space-between;padding:11px 16px;border-bottom:1px solid #f0ede8;gap:8px;flex-wrap:wrap;background:#fafaf9}
   .dp-card-hd-title{font-size:0.85rem;font-weight:700;color:#374151;display:flex;align-items:center;gap:6px;flex-shrink:0}
   .dp-card-hd-ico{color:#6366f1;flex-shrink:0}
   .dp-cat-badge{background:#f1f5f9;color:#475569;font-size:0.72rem;font-weight:600;padding:2px 9px;border-radius:4px;border:1px solid #e2e8f0;white-space:nowrap}

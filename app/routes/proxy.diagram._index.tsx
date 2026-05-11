@@ -50,18 +50,31 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.public.appProxy(request);
 
   const url = new URL(request.url);
-  const search    = url.searchParams.get("q")?.trim() ?? "";
-  const catFilter = url.searchParams.get("cat")    ? Number(url.searchParams.get("cat"))    : null;
-  const serFilter = url.searchParams.get("series") ? Number(url.searchParams.get("series")) : null;
+  const search     = url.searchParams.get("q")?.trim() ?? "";
+  const catFilters = (url.searchParams.get("cats") ?? "")
+    .split(",").map(Number).filter((n) => n > 0);
+  const serFilters = (url.searchParams.get("series") ?? "")
+    .split(",").map(Number).filter((n) => n > 0);
 
   const allCategories = await db.category.findMany({ orderBy: { name: "asc" } });
   const { map: catMap, roots } = buildCatTree(allCategories);
 
-  // Which category IDs to restrict to for the main query
-  const filterIds: number[] | null = serFilter
-    ? getDescendantIds(serFilter, catMap)
-    : catFilter
-      ? getDescendantIds(catFilter, catMap)
+  // Which category IDs to restrict to for the main query.
+  // When series are selected alongside multiple root categories, include diagrams
+  // from every selected series PLUS all diagrams from categories that contain none
+  // of the selected series (so other selected categories stay fully visible).
+  const filterIds: number[] | null = serFilters.length > 0
+    ? [
+        ...serFilters.flatMap((sid) => getDescendantIds(sid, catMap)),
+        ...catFilters
+          .filter((id) => {
+            const desc = getDescendantIds(id, catMap);
+            return !serFilters.some((sid) => desc.includes(sid));
+          })
+          .flatMap((id) => getDescendantIds(id, catMap)),
+      ]
+    : catFilters.length > 0
+      ? catFilters.flatMap((id) => getDescendantIds(id, catMap))
       : null;
 
   const searchWhere = search ? { title: { contains: search, mode: "insensitive" as const } } : {};
@@ -100,17 +113,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     orderBy: { title: "asc" },
   });
 
-  // Series = direct children of the selected root category
-  const seriesOptions: CatNode[] = catFilter ? (catMap.get(catFilter)?.children ?? []) : [];
-
   const base = "/apps/diagram";
 
-  function qp(params: { cat?: string; series?: string; q?: string }) {
+  function qp(params: { cats?: number[]; series?: number[]; q?: string }) {
     const p = new URLSearchParams();
     const q = "q" in params ? params.q : search;
     if (q) p.set("q", q);
-    if (params.cat) p.set("cat", params.cat);
-    if (params.series) p.set("series", params.series);
+    const cats = "cats" in params ? params.cats : catFilters;
+    if (cats && cats.length > 0) p.set("cats", cats.join(","));
+    const series = "series" in params ? params.series : serFilters;
+    if (series && series.length > 0) p.set("series", series.join(","));
     const s = p.toString();
     return s ? `${base}?${s}` : base;
   }
@@ -122,8 +134,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   /* ── icons ───────────────────────────────────────────────────── */
-  const icoGrid   = `<svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor"><path d="M2 4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4zm8 0a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V4zm-8 8a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-4zm8 0a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-4z"/></svg>`;
-  const icoFolder = `<svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor"><path d="M2 6a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6z"/></svg>`;
   const icoSearch = `<svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="#9ca3af" stroke-width="2"><circle cx="8.5" cy="8.5" r="5.5"/><line x1="13" y1="13" x2="18" y2="18"/></svg>`;
   const icoDoc    = `<svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M4 4a2 2 0 0 1 2-2h4.586A2 2 0 0 1 12 2.586L15.414 6A2 2 0 0 1 16 7.414V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4zm2 6a1 1 0 0 1 1-1h6a1 1 0 1 1 0 2H7a1 1 0 0 1-1-1zm1 3a1 1 0 1 0 0 2h6a1 1 0 1 0 0-2H7z"/></svg>`;
 
@@ -155,82 +165,133 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const filteredCount = diagrams.length;
 
-  const activeFilterCount = (catFilter ? 1 : 0) + (serFilter ? 1 : 0);
+  const activeFilterCount = catFilters.length + serFilters.length;
   const icoFilterSliders = `<svg width="15" height="15" viewBox="0 0 20 20" fill="currentColor"><path d="M3 5a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H4a1 1 0 0 1-1-1zm3 5a1 1 0 0 1 1-1h6a1 1 0 1 1 0 2H7a1 1 0 0 1-1-1zm2 5a1 1 0 0 1 1-1h2a1 1 0 1 1 0 2H9a1 1 0 0 1-1-1z"/></svg>`;
+  const icoFolderAmber = `<svg width="13" height="13" viewBox="0 0 24 24" fill="#f59e0b"><path d="M3 7a2 2 0 0 1 2-2h4.586a1 1 0 0 1 .707.293L11.707 6.7A1 1 0 0 0 12.414 7H19a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>`;
+  const icoFolderSlate = `<svg width="13" height="13" viewBox="0 0 24 24" fill="#94a3b8"><path d="M3 7a2 2 0 0 1 2-2h4.586a1 1 0 0 1 .707.293L11.707 6.7A1 1 0 0 0 12.414 7H19a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>`;
+  const icoChevRight = `<svg width="10" height="10" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M7.293 14.707a1 1 0 0 1 0-1.414L10.586 10 7.293 6.707a1 1 0 0 1 1.414-1.414l4 4a1 1 0 0 1 0 1.414l-4 4a1 1 0 0 1-1.414 0z"/></svg>`;
+
+  const catTreeHtml = roots.map((r) => {
+    const isSelected = catFilters.includes(r.id);
+    const showChildren = isSelected && r.children.length > 0;
+    const count = rootCounts.get(r.id) ?? 0;
+    const rChildIds = new Set(r.children.map((c) => c.id));
+    const toggleHref = isSelected
+      ? qp({ cats: catFilters.filter((id) => id !== r.id), series: serFilters.filter((sid) => !rChildIds.has(sid)) })
+      : qp({ cats: [...catFilters, r.id] });
+    const childrenHtml = showChildren ? `
+      <div class="dgl-chk-children is-open">
+        ${r.children.map((s) => {
+          const serSelected = serFilters.includes(s.id);
+          const serHref = serSelected
+            ? qp({ series: serFilters.filter((sid) => sid !== s.id) })
+            : qp({ series: [...serFilters, s.id] });
+          return `
+        <a class="dgl-chk-row${serSelected ? " is-checked" : ""}" href="${esc(serHref)}">
+          <span class="dgl-chk-spacer"></span>
+          <input class="dgl-chk-input" type="checkbox"${serSelected ? " checked" : ""} readonly />
+          ${icoFolderSlate}
+          <span class="dgl-chk-label">${esc(s.name)}</span>
+        </a>`;
+        }).join("")}
+      </div>` : "";
+    return `
+    <div class="dgl-chk-item">
+      <a class="dgl-chk-row${isSelected ? " is-checked" : ""}" href="${esc(toggleHref)}">
+        ${showChildren ? `<button class="dgl-chk-toggle js-chk-toggle is-open" type="button">${icoChevRight}</button>` : `<span class="dgl-chk-spacer"></span>`}
+        <input class="dgl-chk-input" type="checkbox"${isSelected ? " checked" : ""} readonly />
+        ${icoFolderAmber}
+        <span class="dgl-chk-label">${esc(r.name)}</span>
+        ${!isSelected ? `<span class="dgl-chk-count">${count}</span>` : ""}
+      </a>
+      ${childrenHtml}
+    </div>`;
+  }).join("");
 
   const html = `
 <div class="dgl">
 <style>
   .dgl *,.dgl *::before,.dgl *::after{box-sizing:border-box}
-  .dgl{width:100%;max-width:1260px;margin:0 auto;padding:28px 20px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#111827;background:#f2f0eb}
+  .dgl{width:100%;max-width:1260px;margin:0 auto;padding:28px 20px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#111827}
 
   /* header */
-  .dgl-head{margin-bottom:22px}
-  .dgl-head h1{font-size:1.75rem;font-weight:800;color:#111827;margin:0 0 6px}
-  .dgl-head p{color:#6b7280;margin:0;font-size:0.95rem;max-width:580px;line-height:1.5}
+  .dgl-hero{margin-bottom:22px}
+  .dgl-hero h1{font-size:1.75rem;font-weight:800;color:#111827;margin:0 0 6px}
+  .dgl-hero p{color:#6b7280;margin:0;font-size:0.95rem;max-width:580px;line-height:1.5}
 
   /* search card */
-  .dgl-search-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;margin-bottom:20px;box-shadow:0 1px 4px rgba(0,0,0,0.05)}
+  .dgl-search-card{background:#fff;border:1px solid #e2e0da;border-radius:10px;overflow:hidden;margin-bottom:20px;box-shadow:0 1px 3px rgba(0,0,0,0.06)}
   .dgl-search-row{padding:14px 18px;display:flex;align-items:center;gap:10px}
-  .dgl-search-input-wrap{flex:1;display:flex;align-items:center;gap:10px;background:#f9fafb;border:1.5px solid #e5e7eb;border-radius:10px;padding:9px 14px;transition:border-color 0.15s}
-  .dgl-search-input-wrap:focus-within{border-color:#6366f1;background:#fff}
+  .dgl-search-input-wrap{flex:1;display:flex;align-items:center;gap:10px;background:#fafaf9;border:1.5px solid #e2e0da;border-radius:8px;padding:9px 14px;transition:border-color 0.15s,box-shadow 0.15s}
+  .dgl-search-input-wrap:focus-within{border-color:#1d4ed8;background:#fff;box-shadow:0 0 0 3px rgba(29,78,216,0.08)}
   .dgl-search-input-wrap input{flex:1;border:none;background:none;font-size:0.9rem;color:#111827;outline:none}
   .dgl-search-input-wrap input::placeholder{color:#9ca3af}
-  .dgl-search-btn{background:#111827;color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:0.87rem;font-weight:600;cursor:pointer;white-space:nowrap;font-family:inherit}
-  .dgl-search-btn:hover{background:#1f2937}
+  .dgl-search-btn{background:#1d4ed8;color:#fff;border:none;border-radius:7px;padding:9px 20px;font-size:0.87rem;font-weight:600;cursor:pointer;white-space:nowrap;font-family:inherit;transition:background 0.15s}
+  .dgl-search-btn:hover{background:#1e40af}
 
   /* mobile filter toggle */
-  .dgl-filter-toggle{display:none;align-items:center;gap:8px;padding:9px 16px;border:1.5px solid #e5e7eb;border-radius:8px;background:#fff;font-size:0.87rem;font-weight:600;color:#374151;cursor:pointer;margin-bottom:16px;font-family:inherit;transition:border-color 0.15s}
-  .dgl-filter-toggle:hover{border-color:#6366f1;color:#6366f1}
-  .dgl-filter-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;background:#6366f1;color:#fff;border-radius:10px;font-size:0.7rem;font-weight:700;padding:0 5px}
+  .dgl-filter-toggle{display:none;align-items:center;gap:8px;padding:9px 16px;border:1.5px solid #e2e0da;border-radius:7px;background:#fff;font-size:0.87rem;font-weight:600;color:#374151;cursor:pointer;margin-bottom:16px;font-family:inherit;transition:border-color 0.15s}
+  .dgl-filter-toggle:hover{border-color:#1d4ed8;color:#1d4ed8}
+  .dgl-filter-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;background:#1d4ed8;color:#fff;border-radius:10px;font-size:0.7rem;font-weight:700;padding:0 5px}
 
   /* two-column layout */
   .dgl-layout{display:grid;grid-template-columns:220px 1fr;gap:24px;align-items:start}
 
   /* loading spinner */
   .dgl-spinner{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:80px 0;color:#9ca3af;font-size:0.88rem}
-  .dgl-spinner-ring{width:38px;height:38px;border:3px solid #e5e7eb;border-top-color:#6366f1;border-radius:50%;animation:dgl-spin 0.65s linear infinite}
+  .dgl-spinner-ring{width:38px;height:38px;border:3px solid #e2e0da;border-top-color:#1d4ed8;border-radius:50%;animation:dgl-spin 0.65s linear infinite}
   @keyframes dgl-spin{to{transform:rotate(360deg)}}
 
   /* sidebar */
-  .dgl-sidebar{background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;position:sticky;top:20px}
-  .dgl-sidebar-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #f3f4f6}
-  .dgl-sidebar-title{font-size:0.78rem;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:0.06em;margin:0}
-  .dgl-clear-all{font-size:0.78rem;color:#6366f1;font-weight:600;text-decoration:none}
+  .dgl-sidebar{background:#fff;border:1px solid #e2e0da;border-radius:10px;overflow:hidden;position:sticky;top:20px;box-shadow:0 1px 3px rgba(0,0,0,0.06)}
+  .dgl-sidebar-head{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-bottom:1px solid #f0ede8;background:#fafaf9}
+  .dgl-sidebar-title{font-size:0.72rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.07em;margin:0}
+  .dgl-clear-all{font-size:0.78rem;color:#1d4ed8;font-weight:600;text-decoration:none}
   .dgl-clear-all:hover{text-decoration:underline}
   .dgl-filter-group{padding:14px 16px}
-  .dgl-filter-group+.dgl-filter-group{border-top:1px solid #f3f4f6}
+  .dgl-filter-group+.dgl-filter-group{border-top:1px solid #f0ede8}
   .dgl-filter-group-title{font-size:0.7rem;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.07em;margin:0 0 10px}
-  .dgl-cat-list,.dgl-ser-list{display:flex;flex-direction:column;gap:2px}
-  .dg-cat-link,.dg-ser-link{display:flex;align-items:center;gap:7px;padding:7px 10px;border-radius:8px;text-decoration:none;color:#374151;font-size:0.87rem;font-weight:500;transition:background 0.12s,color 0.12s}
-  .dg-cat-link:hover,.dg-ser-link:hover{background:#f5f3ff;color:#6366f1}
-  .dg-cat-link.active,.dg-ser-link.active{background:#6366f1;color:#fff;font-weight:600}
-  .dg-cat-count{margin-left:auto;font-size:0.72rem;background:#f3f4f6;color:#6b7280;padding:2px 7px;border-radius:10px;flex-shrink:0;font-weight:600;transition:background 0.12s,color 0.12s}
-  .dg-cat-link.active .dg-cat-count,.dg-ser-link.active .dg-cat-count{background:rgba(255,255,255,0.22);color:#fff}
-  .dg-ser-link{font-size:0.84rem;padding-left:14px}
+  /* checkbox tree filter */
+  .dgl-chk-list{display:flex;flex-direction:column;gap:1px}
+  .dgl-chk-row{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px;cursor:pointer;user-select:none;transition:background 0.1s;text-decoration:none;color:inherit}
+  .dgl-chk-row:hover{background:#f9f7f4}
+  .dgl-chk-row.is-checked{background:#eff6ff}
+  .dgl-chk-toggle{width:16px;height:16px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:none;border:none;cursor:pointer;padding:0;color:#c4bcb0;line-height:1;transition:color 0.1s}
+  .dgl-chk-toggle:hover{color:#6b7280}
+  .dgl-chk-toggle svg{transition:transform 0.15s}
+  .dgl-chk-toggle.is-open svg{transform:rotate(90deg)}
+  .dgl-chk-spacer{width:16px;height:16px;flex-shrink:0;display:inline-block}
+  .dgl-chk-input{width:14px;height:14px;flex-shrink:0;accent-color:#1d4ed8;pointer-events:none;cursor:pointer}
+  .dgl-chk-label{font-size:0.86rem;color:#374151;flex:1;line-height:1.35}
+  .dgl-chk-row.is-checked .dgl-chk-label{color:#1d4ed8;font-weight:600}
+  .dgl-chk-count{font-size:0.7rem;background:#f0ede8;color:#6b7280;padding:2px 6px;border-radius:8px;flex-shrink:0;font-weight:600;line-height:1.3}
+  .dgl-chk-row.is-checked .dgl-chk-count{background:#dbeafe;color:#1d4ed8}
+  .dgl-chk-children{padding-left:22px;display:none}
+  .dgl-chk-children.is-open{display:block}
+  .dgl-chk-children .dgl-chk-label{font-size:0.83rem}
 
   /* results meta */
   .dgl-meta{font-size:0.85rem;color:#6b7280;margin-bottom:18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
   .dgl-meta strong{color:#111827;font-weight:600}
   .dgl-meta-clear{font-size:0.8rem;color:#6b7280;text-decoration:none;display:inline-flex;align-items:center;gap:3px}
-  .dgl-meta-clear:hover{color:#6366f1}
+  .dgl-meta-clear:hover{color:#1d4ed8}
 
   /* grid */
   .dgl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:18px}
 
   /* card */
-  .dg-card{display:flex;flex-direction:column;background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;text-decoration:none;color:inherit;transition:box-shadow 0.15s,transform 0.15s,border-color 0.15s}
-  .dg-card:hover{box-shadow:0 8px 24px rgba(0,0,0,0.1);transform:translateY(-2px);border-color:#d1d5db}
+  .dg-card{display:flex;flex-direction:column;background:#fff;border:1px solid #e2e0da;border-radius:10px;overflow:hidden;text-decoration:none;color:inherit;transition:box-shadow 0.15s,transform 0.15s,border-color 0.15s}
+  .dg-card:hover{box-shadow:0 8px 24px rgba(0,0,0,0.1);transform:translateY(-2px);border-color:#c4bcb0}
   .dg-card-img{position:relative;aspect-ratio:4/3;background:#f8f9fa;overflow:hidden}
   .dg-card-img img{width:100%;height:100%;object-fit:cover;display:block;transition:transform 0.2s}
-  .dg-card:hover .dg-card-img img{transform:scale(1.03)}
+  .dg-card:hover .dg-card-img img{transform:scale(1.04)}
   .card-no-img{width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(145deg,#f3f4f6,#e9ebee)}
   .card-no-img svg{width:40px;height:40px;fill:#c4ccd5}
   .dg-badge{position:absolute;top:10px;right:10px;background:rgba(17,24,39,0.72);backdrop-filter:blur(4px);color:#fff;font-size:0.6rem;font-weight:700;letter-spacing:0.06em;padding:3px 9px;border-radius:5px;text-transform:uppercase}
   .dg-card-body{padding:14px 16px 12px;display:flex;flex-direction:column;flex:1}
   .dg-card-title{font-size:0.95rem;font-weight:700;color:#1d4ed8;margin-bottom:3px;line-height:1.3}
   .dg-card-desc{font-size:0.8rem;color:#4b5563;line-height:1.4;margin-bottom:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-  .dg-card-foot{display:flex;align-items:center;justify-content:space-between;margin-top:auto;padding-top:10px;border-top:1px solid #f3f4f6}
+  .dg-card-foot{display:flex;align-items:center;justify-content:space-between;margin-top:auto;padding-top:10px;border-top:1px solid #f0ede8}
   .dg-parts{display:flex;align-items:center;gap:5px;font-size:0.77rem;color:#6b7280}
   .dg-view{font-size:0.8rem;font-weight:600;color:#1d4ed8}
   .dg-card:hover .dg-view{text-decoration:underline}
@@ -239,14 +300,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   .dgl-empty{text-align:center;padding:64px 0;color:#6b7280}
   .dgl-empty h3{font-size:1.1rem;color:#374151;margin:0 0 8px;font-weight:600}
   .dgl-empty p{margin:0 0 14px;font-size:0.9rem}
-  .dgl-empty a{color:#6366f1;font-weight:600;text-decoration:none}
+  .dgl-empty a{color:#1d4ed8;font-weight:600;text-decoration:none}
 
   @media(max-width:860px){
     .dgl-layout{grid-template-columns:190px 1fr}
   }
   @media(max-width:680px){
     .dgl{padding:20px 14px}
-    .dgl-head h1{font-size:1.4rem}
+    .dgl-hero h1{font-size:1.4rem}
     .dgl-layout{grid-template-columns:1fr}
     .dgl-sidebar{position:static;display:none}
     .dgl-sidebar.is-open{display:block}
@@ -255,16 +316,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 </style>
 
-<div class="dgl-head">
+<div class="dgl-hero">
   <h1>Parts Diagram Library</h1>
   <p>Browse all available diagrams. Select a diagram to view the exploded parts list and order components.</p>
 </div>
 
+
 <!-- Search bar — stays at the top -->
 <div class="dgl-search-card">
   <form class="dgl-search-row js-dgl-search-form" method="GET" action="${esc(base)}">
-    ${catFilter ? `<input type="hidden" name="cat" value="${catFilter}" />` : ""}
-    ${serFilter ? `<input type="hidden" name="series" value="${serFilter}" />` : ""}
+    ${catFilters.length > 0 ? `<input type="hidden" name="cats" value="${catFilters.join(",")}" />` : ""}
+    ${serFilters.length > 0 ? `<input type="hidden" name="series" value="${serFilters.join(",")}" />` : ""}
     <div class="dgl-search-input-wrap">
       ${icoSearch}
       <input
@@ -292,40 +354,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   <aside class="dgl-sidebar js-dgl-sidebar">
     <div class="dgl-sidebar-head">
       <span class="dgl-sidebar-title">Filters</span>
-      ${(catFilter || serFilter || search) ? `<a href="${esc(base)}" class="dgl-clear-all">Clear all</a>` : ""}
+      ${(catFilters.length > 0 || serFilters.length > 0 || search) ? `<a href="${esc(base)}" class="dgl-clear-all">Clear all</a>` : ""}
     </div>
 
     <!-- Category filter -->
     <div class="dgl-filter-group">
       <p class="dgl-filter-group-title">Category</p>
-      <div class="dgl-cat-list">
-        <a href="${esc(qp({}))}" class="dg-cat-link${!catFilter ? " active" : ""}">
-          ${icoGrid} All
-          <span class="dg-cat-count">${totalCount}</span>
+      <div class="dgl-chk-list">
+        <a class="dgl-chk-row${catFilters.length === 0 ? " is-checked" : ""}" href="${esc(qp({ cats: [], series: [] }))}">
+          <span class="dgl-chk-spacer"></span>
+          <input class="dgl-chk-input" type="checkbox"${catFilters.length === 0 ? " checked" : ""} readonly />
+          <span class="dgl-chk-label">All</span>
+          <span class="dgl-chk-count">${totalCount}</span>
         </a>
-        ${roots.map((r) => `
-        <a href="${esc(qp({ cat: String(r.id) }))}" class="dg-cat-link${catFilter === r.id ? " active" : ""}">
-          ${icoFolder} ${esc(r.name)}
-          <span class="dg-cat-count">${rootCounts.get(r.id) ?? 0}</span>
-        </a>`).join("")}
+        ${catTreeHtml}
       </div>
     </div>
-
-    ${seriesOptions.length > 0 ? `
-    <!-- Series filter (only when a category is selected) -->
-    <div class="dgl-filter-group">
-      <p class="dgl-filter-group-title">Series</p>
-      <div class="dgl-ser-list">
-        <a href="${esc(qp({ cat: String(catFilter) }))}" class="dg-ser-link${!serFilter ? " active" : ""}">
-          All Series
-        </a>
-        ${seriesOptions.map((s) => `
-        <a href="${esc(qp({ cat: String(catFilter), series: String(s.id) }))}" class="dg-ser-link${serFilter === s.id ? " active" : ""}">
-          ${esc(s.name)}
-        </a>`).join("")}
-      </div>
-    </div>
-    ` : ""}
   </aside>
 
   <!-- RIGHT: results -->
@@ -340,7 +384,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" stroke-width="1.5" style="margin-bottom:12px"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
       <h3>${search ? `No diagrams found for &ldquo;${esc(search)}&rdquo;` : "No diagrams available yet."}</h3>
       <p>${search ? "Try a different search term or clear the filters." : "Check back soon."}</p>
-      ${search || catFilter ? `<a href="${esc(base)}">View all diagrams</a>` : ""}
+      ${search || catFilters.length > 0 ? `<a href="${esc(base)}">View all diagrams</a>` : ""}
     </div>
     ` : `
     <div class="dgl-grid">
@@ -411,8 +455,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   }
 
-  /* ── Intercept filter / clear links (not diagram card links) ──── */
+  /* ── Global click handler: chevron toggle + AJAX link interception ── */
   document.querySelector('.dgl').addEventListener('click', function(e) {
+    /* Chevron expand/collapse — must check before link interception */
+    var toggle = e.target.closest('.js-chk-toggle');
+    if (toggle) {
+      e.preventDefault();
+      var item = toggle.closest('.dgl-chk-item');
+      var children = item && item.querySelector('.dgl-chk-children');
+      if (children) {
+        var open = children.classList.toggle('is-open');
+        toggle.classList.toggle('is-open', open);
+      }
+      return;
+    }
+
+    /* AJAX navigation for filter/clear links (skip diagram card links) */
     var link = e.target.closest('a');
     if (!link || link.closest('.dg-card')) return;
     var href = link.getAttribute('href') || '';
