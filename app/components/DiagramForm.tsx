@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Form } from "react-router";
 import { FileUpload } from "./FileUpload";
 import { ProductPicker, type SelectedProduct } from "./ProductPicker";
-import { CategoryPicker, type CategoryPickerItem } from "./CategoryPicker";
+import { CategoryPicker, type CategoryPickerItem, expandWithAncestors } from "./CategoryPicker";
 
 interface DiagramData {
   id: number;
@@ -37,7 +37,7 @@ export function DiagramForm({ diagram, allCategories, isSubmitting, errors = {} 
   const [imageUrl, setImageUrl] = useState(diagram?.imageUrl ?? "");
   const [fileUrl, setFileUrl] = useState(diagram?.fileUrl ?? "");
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>(
-    diagram?.categoryIds ?? [],
+    () => expandWithAncestors(diagram?.categoryIds ?? [], allCategories),
   );
   const [selectedProducts, setSelectedProducts] = useState<SelectedProduct[]>(
     diagram?.products ?? [],
@@ -86,8 +86,8 @@ export function DiagramForm({ diagram, allCategories, isSubmitting, errors = {} 
           {handle && (
             <s-text>
               Storefront URL:{" "}
-              <s-link href={`/apps/diagram/${handle}`} target="_blank">
-                /apps/diagram/{handle}
+              <s-link href={`https://old-coleman-parts.myshopify.com/apps/diagram/${handle}`} target="_blank">
+                https://old-coleman-parts.myshopify.com/apps/diagram/{handle}
               </s-link>
             </s-text>
           )}
@@ -154,7 +154,7 @@ export function DiagramForm({ diagram, allCategories, isSubmitting, errors = {} 
           <s-heading>Diagram image</s-heading>
           <input type="hidden" name="imageUrl" value={imageUrl} />
           <FileUpload
-            label="Diagram image"
+            label=""
             accept="image/*"
             onComplete={setImageUrl}
             currentUrl={imageUrl || undefined}
@@ -162,7 +162,6 @@ export function DiagramForm({ diagram, allCategories, isSubmitting, errors = {} 
         </div>
 
         <div>
-          <s-heading>Products (parts)</s-heading>
           <input
             type="hidden"
             name="products"
