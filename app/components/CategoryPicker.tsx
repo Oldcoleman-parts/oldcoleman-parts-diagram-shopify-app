@@ -37,6 +37,31 @@ function getPath(id: number, cats: CategoryPickerItem[]): string {
   return parts.join(" › ");
 }
 
+function getAncestorIds(id: number, cats: CategoryPickerItem[]): number[] {
+  const map = new Map(cats.map((c) => [c.id, c]));
+  const ancestors: number[] = [];
+  let cur = map.get(id);
+  while (cur?.parentId) {
+    ancestors.push(cur.parentId);
+    cur = map.get(cur.parentId);
+  }
+  return ancestors;
+}
+
+export function expandWithAncestors(ids: number[], cats: CategoryPickerItem[]): number[] {
+  const all = new Set(ids);
+  for (const id of ids) {
+    for (const anc of getAncestorIds(id, cats)) all.add(anc);
+  }
+  return Array.from(all);
+}
+
+function hasDescendantSelected(node: TreeNode, selectedIds: number[]): boolean {
+  return node.children.some(
+    (c) => selectedIds.includes(c.id) || hasDescendantSelected(c, selectedIds),
+  );
+}
+
 function FolderIcon({ depth }: { depth: number }) {
   const color = depth === 0 ? "#f59e0b" : depth === 1 ? "#94a3b8" : "#c4ccd5";
   return (
@@ -52,10 +77,13 @@ function CheckRow({ node, depth, selectedIds, onToggle }: {
   selectedIds: number[];
   onToggle: (id: number) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const [hov, setHov] = useState(false);
   const hasChildren = node.children.length > 0;
   const isSelected = selectedIds.includes(node.id);
+  // Auto-expand if any descendant is selected so user can see why parent is checked
+  const [expanded, setExpanded] = useState(
+    () => hasChildren && hasDescendantSelected(node, selectedIds),
+  );
+  const [hov, setHov] = useState(false);
 
   return (
     <>
@@ -144,11 +172,13 @@ export function CategoryPicker({ allCategories, selectedIds, onChange }: {
   const tree = buildTree(allCategories);
 
   function toggle(id: number) {
-    onChange(
-      selectedIds.includes(id)
-        ? selectedIds.filter((x) => x !== id)
-        : [...selectedIds, id],
-    );
+    if (selectedIds.includes(id)) {
+      onChange(selectedIds.filter((x) => x !== id));
+    } else {
+      // Also select all ancestors so parent categories appear checked
+      const ancestors = getAncestorIds(id, allCategories);
+      onChange([...new Set([...selectedIds, id, ...ancestors])]);
+    }
   }
 
   const selectedItems = allCategories.filter((c) => selectedIds.includes(c.id));

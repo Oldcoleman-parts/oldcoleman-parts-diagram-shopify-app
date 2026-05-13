@@ -114,6 +114,9 @@ function CategoryModalInner({ onClose, onSaved, allCategories, editCategory, def
   const onSavedRef = useRef(onSaved);
   onSavedRef.current = onSaved;
 
+  const isEditing = !!editCategory;
+  const isCreatingRoot = !isEditing && !defaultParentId;
+
   const [name, setName] = useState(editCategory?.name ?? "");
   const [imageUrl, setImageUrl] = useState(editCategory?.imageUrl ?? "");
   const [parentId, setParentId] = useState(
@@ -123,6 +126,22 @@ function CategoryModalInner({ onClose, onSaved, allCategories, editCategory, def
         ? String(defaultParentId)
         : "",
   );
+
+  // Subcategories to create alongside the new root category
+  const [subNames, setSubNames] = useState<string[]>([]);
+  const [subInput, setSubInput] = useState("");
+
+  function addSub() {
+    const trimmed = subInput.trim();
+    if (trimmed && !subNames.includes(trimmed)) {
+      setSubNames((prev) => [...prev, trimmed]);
+      setSubInput("");
+    }
+  }
+
+  function removeSub(n: string) {
+    setSubNames((prev) => prev.filter((x) => x !== n));
+  }
 
   const dismiss = useCallback(() => {
     dialogRef.current?.close();
@@ -170,6 +189,7 @@ function CategoryModalInner({ onClose, onSaved, allCategories, editCategory, def
     if (parentId) data.set("parentId", parentId);
     if (imageUrl) data.set("imageUrl", imageUrl);
     if (editCategory) data.set("id", String(editCategory.id));
+    if (isCreatingRoot && subNames.length > 0) data.set("subcategoryNames", JSON.stringify(subNames));
     fetcher.submit(data, { method: "post" });
   }
 
@@ -183,7 +203,7 @@ function CategoryModalInner({ onClose, onSaved, allCategories, editCategory, def
     <dialog ref={dialogRef} className="app-modal" style={dialogStyle}>
       <div style={headerStyle}>
         <span style={{ fontSize: "16px", fontWeight: 600, color: "#202223" }}>
-          {editCategory ? "Edit category" : "Add category"}
+          {isEditing ? "Edit category" : isCreatingRoot ? "Create category" : "Create subcategory"}
         </span>
         <button onClick={dismiss} aria-label="Close" style={closeBtnStyle}>✕</button>
       </div>
@@ -198,47 +218,110 @@ function CategoryModalInner({ onClose, onSaved, allCategories, editCategory, def
             error={errors.name}
           />
 
-          {/* Parent selector — shows full hierarchy with depth prefix */}
-          <div>
-            <div style={{ fontSize: "13px", fontWeight: 500, color: "#202223", marginBottom: "6px" }}>
-              Parent category
-            </div>
-            {parentId && selectedParentLabel && (
-              <div style={{
-                fontSize: "12px",
-                color: "#6d7175",
-                background: "#f6f6f7",
-                border: "1px solid #e1e3e5",
-                borderRadius: "4px",
-                padding: "4px 8px",
-                marginBottom: "6px",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-              }}>
-                <span>📂</span>
-                <span>{selectedParentLabel}</span>
+          {/* Parent selector — only for subcategory creation or editing */}
+          {!isCreatingRoot && (
+            <div>
+              <div style={{ fontSize: "13px", fontWeight: 500, color: "#202223", marginBottom: "6px" }}>
+                Parent category
               </div>
-            )}
-            <s-select
-              value={parentId}
-              onChange={(e: Event) =>
-                setParentId((e.currentTarget as HTMLSelectElement).value)
-              }
-            >
-              <s-option value="">— No parent (root category)</s-option>
-              {options.map((opt) => (
-                <s-option key={opt.id} value={String(opt.id)}>
-                  {opt.label}
-                </s-option>
-              ))}
-            </s-select>
-          </div>
+              {parentId && selectedParentLabel && (
+                <div style={{
+                  fontSize: "12px", color: "#6d7175",
+                  background: "#f6f6f7", border: "1px solid #e1e3e5",
+                  borderRadius: "4px", padding: "4px 8px", marginBottom: "6px",
+                  display: "inline-flex", alignItems: "center", gap: "6px",
+                }}>
+                  <span>📂</span>
+                  <span>{selectedParentLabel}</span>
+                </div>
+              )}
+              <s-select
+                value={parentId}
+                onChange={(e: Event) =>
+                  setParentId((e.currentTarget as HTMLSelectElement).value)
+                }
+              >
+                <s-option value="">— No parent (root category)</s-option>
+                {options.map((opt) => (
+                  <s-option key={opt.id} value={String(opt.id)}>
+                    {opt.label}
+                  </s-option>
+                ))}
+              </s-select>
+            </div>
+          )}
+
+          {/* Subcategories — only when creating a root category */}
+          {isCreatingRoot && (
+            <div>
+              <div style={{ fontSize: "13px", fontWeight: 500, color: "#202223", marginBottom: "8px" }}>
+                Subcategories <span style={{ fontWeight: 400, color: "#9ca3af" }}>(optional)</span>
+              </div>
+
+              {/* Chips for added subcategories */}
+              {subNames.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "8px" }}>
+                  {subNames.map((n) => (
+                    <span
+                      key={n}
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: "4px",
+                        background: "#edf9f4", border: "1px solid #a3d9be",
+                        borderRadius: "20px", padding: "3px 8px 3px 10px",
+                        fontSize: "12px", color: "#006e52", fontWeight: 500,
+                      }}
+                    >
+                      {n}
+                      <button
+                        type="button"
+                        onClick={() => removeSub(n)}
+                        style={{
+                          background: "none", border: "none", cursor: "pointer",
+                          padding: 0, color: "#65a58f", fontSize: "16px", lineHeight: 1,
+                          display: "flex", alignItems: "center",
+                        }}
+                      >×</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Input row */}
+              <div style={{ display: "flex", gap: "8px" }}>
+                <input
+                  type="text"
+                  value={subInput}
+                  placeholder="Subcategory name…"
+                  onChange={(e) => setSubInput(e.target.value)}
+                  onKeyDown={(e: React.KeyboardEvent) => {
+                    if (e.key === "Enter") { e.preventDefault(); addSub(); }
+                  }}
+                  style={{
+                    flex: 1, fontSize: "13px", padding: "7px 10px",
+                    border: "1px solid #d1d5db", borderRadius: "6px",
+                    outline: "none", fontFamily: "inherit",
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={addSub}
+                  style={{
+                    background: "#f3f4f6", border: "1px solid #d1d5db",
+                    borderRadius: "6px", padding: "7px 14px",
+                    cursor: "pointer", fontSize: "13px", fontWeight: 500,
+                    color: "#374151", whiteSpace: "nowrap",
+                  }}
+                >
+                  + Add
+                </button>
+              </div>
+            </div>
+          )}
 
           <div>
             <s-text>Category image (optional)</s-text>
             <FileUpload
-              label="Category image"
+              label=""
               accept="image/*"
               onComplete={setImageUrl}
               currentUrl={imageUrl || undefined}

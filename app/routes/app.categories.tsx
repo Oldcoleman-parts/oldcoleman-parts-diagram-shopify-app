@@ -38,13 +38,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const parentId = formData.get("parentId");
     const imageUrl = formData.get("imageUrl") as string | null;
 
-    await db.category.create({
+    const category = await db.category.create({
       data: {
         name,
         imageUrl: imageUrl || null,
         parentId: parentId ? Number(parentId) : null,
       },
     });
+
+    // Create subcategories submitted alongside the root category
+    const subcategoryNamesRaw = formData.get("subcategoryNames") as string | null;
+    if (subcategoryNamesRaw) {
+      try {
+        const subNames: string[] = JSON.parse(subcategoryNamesRaw);
+        await Promise.all(
+          subNames
+            .map((n) => n.trim())
+            .filter(Boolean)
+            .map((n) => db.category.create({ data: { name: n, parentId: category.id } })),
+        );
+      } catch { /* ignore parse errors */ }
+    }
+
     return { success: true };
   }
 
@@ -226,10 +241,10 @@ function FolderIcon({ size = 22, color = "#c0c4c9" }: { size?: number; color?: s
   );
 }
 
-function IconBtn({ onClick, title, danger, children }: {
+function IconBtn({ onClick, title, color = "#6b7280", children }: {
   onClick: () => void;
   title: string;
-  danger?: boolean;
+  color?: string;
   children: ReactNode;
 }) {
   const [hov, setHov] = useState(false);
@@ -240,17 +255,18 @@ function IconBtn({ onClick, title, danger, children }: {
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{
-        background: hov ? (danger ? "#fff0ee" : "#f1f2f3") : "transparent",
+        background: hov ? `${color}22` : "transparent",
         border: "none",
         borderRadius: "5px",
         padding: "5px",
         cursor: "pointer",
-        color: hov ? (danger ? "#c0392b" : "#3d3d3d") : "#9ca3af",
+        color,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         flexShrink: 0,
         lineHeight: 1,
+        transition: "background 0.15s",
       }}
     >
       {children}
@@ -373,10 +389,10 @@ function TreeRow({ node, depth, onEdit, onDelete, onAddChild, rootColorIndex = 0
         {hovered ? (
           <div style={{ display: "flex", alignItems: "center", gap: "2px", flexShrink: 0 }}>
             <AddSubBtn onClick={() => onAddChild(node.id)} />
-            <IconBtn onClick={() => onEdit(node)} title="Edit category">
+            <IconBtn onClick={() => onEdit(node)} title="Edit category" color="#63c49a">
               <PencilIcon />
             </IconBtn>
-            <IconBtn onClick={() => onDelete(node)} title="Delete category" danger>
+            <IconBtn onClick={() => onDelete(node)} title="Delete category" color="#f0877a">
               <TrashIcon />
             </IconBtn>
           </div>
@@ -517,7 +533,7 @@ export default function CategoriesPage() {
   return (
     <s-page heading="Categories">
       <s-button slot="primary-action" variant="primary" onClick={openCreate}>
-        Add category
+        Create category
       </s-button>
 
       <s-section>
