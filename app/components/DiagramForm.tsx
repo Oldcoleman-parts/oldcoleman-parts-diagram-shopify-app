@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Form } from "react-router";
 import { FileUpload } from "./FileUpload";
 import { ProductPicker, type SelectedProduct } from "./ProductPicker";
-import { CategoryPicker, type CategoryPickerItem, expandWithAncestors } from "./CategoryPicker";
+import { CategoryPicker, type CategoryPickerItem } from "./CategoryPicker";
 
 interface DiagramData {
   id: number;
@@ -29,6 +29,14 @@ function toHandle(title: string) {
     .replace(/^-|-$/g, "");
 }
 
+const sectionLabel: React.CSSProperties = {
+  fontSize: "13px",
+  fontWeight: 600,
+  color: "#202223",
+  display: "block",
+  marginBottom: "8px",
+};
+
 export function DiagramForm({ diagram, allCategories, isSubmitting, errors = {} }: Props) {
   const [title, setTitle] = useState(diagram?.title ?? "");
   const [handle, setHandle] = useState(diagram?.handle ?? "");
@@ -37,7 +45,7 @@ export function DiagramForm({ diagram, allCategories, isSubmitting, errors = {} 
   const [imageUrl, setImageUrl] = useState(diagram?.imageUrl ?? "");
   const [fileUrl, setFileUrl] = useState(diagram?.fileUrl ?? "");
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>(
-    () => expandWithAncestors(diagram?.categoryIds ?? [], allCategories),
+    diagram?.categoryIds ?? [],
   );
   const [selectedProducts, setSelectedProducts] = useState<SelectedProduct[]>(
     diagram?.products ?? [],
@@ -60,6 +68,7 @@ export function DiagramForm({ diagram, allCategories, isSubmitting, errors = {} 
   return (
     <Form method="post">
       <s-stack direction="block" gap="base">
+
         <s-text-field
           label="Title"
           name="title"
@@ -102,42 +111,17 @@ export function DiagramForm({ diagram, allCategories, isSubmitting, errors = {} 
           }
         />
 
-        {/* Multi-category picker */}
+        {/* Categories */}
         <div>
-          <div style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: "8px",
-          }}>
-            <span style={{ fontSize: "13px", fontWeight: 500, color: "#202223" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+            <span style={{ fontSize: "13px", fontWeight: 600, color: "#202223" }}>
               Categories
-              {selectedCategoryIds.length > 0 && (
-                <span style={{
-                  marginLeft: "6px",
-                  background: "#008060",
-                  color: "#fff",
-                  fontSize: "11px",
-                  fontWeight: 600,
-                  padding: "1px 7px",
-                  borderRadius: "10px",
-                }}>
-                  {selectedCategoryIds.length}
-                </span>
-              )}
             </span>
-            <a
-              href="/app/categories"
-              style={{ fontSize: "12px", color: "#2c6ecb", textDecoration: "none" }}
-            >
+            <a href="/app/categories" style={{ fontSize: "12px", color: "#2c6ecb", textDecoration: "none" }}>
               Manage categories →
             </a>
           </div>
-          <input
-            type="hidden"
-            name="categoryIds"
-            value={JSON.stringify(selectedCategoryIds)}
-          />
+          <input type="hidden" name="categoryIds" value={JSON.stringify(selectedCategoryIds)} />
           <CategoryPicker
             allCategories={allCategories}
             selectedIds={selectedCategoryIds}
@@ -150,8 +134,9 @@ export function DiagramForm({ diagram, allCategories, isSubmitting, errors = {} 
           )}
         </div>
 
+        {/* Diagram image */}
         <div>
-          <s-heading>Diagram image</s-heading>
+          <span style={sectionLabel}>Diagram image</span>
           <input type="hidden" name="imageUrl" value={imageUrl} />
           <FileUpload
             label=""
@@ -161,29 +146,32 @@ export function DiagramForm({ diagram, allCategories, isSubmitting, errors = {} 
           />
         </div>
 
-        <div>
-          <input
-            type="hidden"
-            name="products"
-            value={JSON.stringify(selectedProducts)}
-          />
+        {/* Products */}
+        <div style={{ paddingTop: "4px" }}>
+          <input type="hidden" name="products" value={JSON.stringify(selectedProducts)} />
           <ProductPicker
             selectedProducts={selectedProducts}
             onChange={handleProductsChange}
           />
         </div>
 
+        {/* PDF document — hidden when products are linked */}
         {hasProducts ? (
-          <s-banner tone="info">
-            Document upload is only available for diagrams without linked parts.
-          </s-banner>
+          <input type="hidden" name="fileUrl" value="" />
         ) : (
-          <div>
-            <s-heading>PDF document</s-heading>
-            <s-text>Shown on the storefront when no parts are linked.</s-text>
+          <div style={{
+            border: "1px solid #e1e3e5",
+            borderRadius: "8px",
+            padding: "16px",
+            background: "#fafafa",
+          }}>
+            <span style={sectionLabel}>PDF document</span>
+            <p style={{ fontSize: "13px", color: "#6d7175", margin: "0 0 12px" }}>
+              If products are linked to this diagram, the PDF will not be uploaded.
+            </p>
             <input type="hidden" name="fileUrl" value={fileUrl} />
             <FileUpload
-              label="PDF document"
+              label=""
               accept=".pdf,application/pdf"
               onComplete={setFileUrl}
               currentUrl={fileUrl || undefined}
@@ -191,11 +179,12 @@ export function DiagramForm({ diagram, allCategories, isSubmitting, errors = {} 
           </div>
         )}
 
-        {hasProducts && <input type="hidden" name="fileUrl" value="" />}
+        <div style={{ borderTop: "1px solid #e1e3e5", paddingTop: "16px" }}>
+          <s-button variant="primary" type="submit" loading={isSubmitting}>
+            {diagram ? "Save changes" : "Create diagram"}
+          </s-button>
+        </div>
 
-        <s-button variant="primary" type="submit" loading={isSubmitting}>
-          {diagram ? "Save changes" : "Create diagram"}
-        </s-button>
       </s-stack>
     </Form>
   );

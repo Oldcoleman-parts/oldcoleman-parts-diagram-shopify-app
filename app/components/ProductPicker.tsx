@@ -1,6 +1,6 @@
 import { useAppBridge } from "@shopify/app-bridge-react";
 import type { Product } from "@shopify/app-bridge-types";
-import { type ReactNode, useState } from "react";
+import { useCallback, useEffect, useRef, type ReactNode, useState } from "react";
 
 export interface SelectedProduct {
   productId: string;
@@ -17,8 +17,107 @@ interface Props {
   onChange: (products: SelectedProduct[]) => void;
 }
 
+const modalDialogStyle: React.CSSProperties = {
+  border: "none",
+  borderRadius: "8px",
+  padding: 0,
+  maxWidth: "600px",
+  width: "90vw",
+  boxShadow: "0 4px 20px rgba(0,0,0,.22)",
+  background: "#fff",
+  color: "inherit",
+  fontFamily: "inherit",
+};
+
+function AppModal({
+  heading,
+  onHide,
+  children,
+}: {
+  heading: string;
+  onHide: () => void;
+  children: (dismiss: () => void) => ReactNode;
+}) {
+  const ref = useRef<HTMLDialogElement | null>(null);
+  const onHideRef = useRef(onHide);
+  onHideRef.current = onHide;
+
+  const dismiss = useCallback(() => {
+    ref.current?.close();
+  }, []);
+
+  useEffect(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+    dialog.showModal();
+
+    const onClose = () => onHideRef.current();
+    const onCancel = (e: Event) => {
+      e.preventDefault();
+      dialog.close();
+    };
+    const onClick = (e: MouseEvent) => {
+      const r = dialog.getBoundingClientRect();
+      if (
+        e.clientX < r.left ||
+        e.clientX > r.right ||
+        e.clientY < r.top ||
+        e.clientY > r.bottom
+      )
+        dialog.close();
+    };
+
+    dialog.addEventListener("close", onClose);
+    dialog.addEventListener("cancel", onCancel);
+    dialog.addEventListener("click", onClick);
+    return () => {
+      dialog.removeEventListener("close", onClose);
+      dialog.removeEventListener("cancel", onCancel);
+      dialog.removeEventListener("click", onClick);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <dialog ref={ref} className="app-modal" style={modalDialogStyle}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "16px 20px",
+          borderBottom: "1px solid #e1e3e5",
+        }}
+      >
+        <span style={{ fontSize: "16px", fontWeight: 600, color: "#202223" }}>
+          {heading}
+        </span>
+        <button
+          type="button"
+          onClick={dismiss}
+          aria-label="Close"
+          style={{
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            padding: "4px 8px",
+            borderRadius: "4px",
+            fontSize: "18px",
+            lineHeight: 1,
+            color: "#6d7175",
+          }}
+        >
+          ✕
+        </button>
+      </div>
+      <div style={{ padding: "20px" }}>{children(dismiss)}</div>
+    </dialog>
+  );
+}
+
 export function ProductPicker({ selectedProducts, onChange }: Props) {
   const shopify = useAppBridge();
+  const [deleteTarget, setDeleteTarget] = useState<SelectedProduct | null>(null);
 
   async function openPicker() {
     const selectionIds = selectedProducts.map((p) => ({
@@ -114,7 +213,7 @@ export function ProductPicker({ selectedProducts, onChange }: Props) {
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        marginBottom: selectedProducts.length > 0 ? "4px" : "10px",
+        marginBottom: selectedProducts.length > 0 ? "12px" : "14px",
       }}>
         <span style={{ fontSize: "14px", fontWeight: 600, color: "#202223" }}>
           Products (parts)
@@ -161,19 +260,57 @@ export function ProductPicker({ selectedProducts, onChange }: Props) {
                     <IconBtn
                       title="Remove"
                       color="#f0877a"
-                      onClick={() => remove(p.productId)}
+                      onClick={() => setDeleteTarget(p)}
                     >
                       <TrashIcon />
                     </IconBtn>
-                    {/* <s-button variant="tertiary" onClick={() => remove(p.productId)}>
-                      Remove
-                    </s-button> */}
                   </s-table-cell>
                 </s-table-row>
               ))}
             </s-table-body>
           </s-table>
         </div>
+      )}
+
+      {deleteTarget && (
+        <AppModal heading="Remove product" onHide={() => setDeleteTarget(null)}>
+          {(dismiss) => (
+            <div>
+              <p style={{ margin: "0 0 20px", fontSize: "14px", color: "#202223" }}>
+                Are you sure you want to remove{" "}
+                <strong>{deleteTarget.productTitle}</strong> from this diagram?
+              </p>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+                <button
+                  type="button"
+                  onClick={dismiss}
+                  style={{
+                    background: "#f1f1f1", border: "1px solid #d1d5db",
+                    borderRadius: "6px", padding: "8px 16px",
+                    cursor: "pointer", fontSize: "14px", color: "#374151",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    remove(deleteTarget.productId);
+                    dismiss();
+                  }}
+                  style={{
+                    background: "#d72c0d", border: "none",
+                    borderRadius: "6px", padding: "8px 16px",
+                    cursor: "pointer", fontSize: "14px",
+                    fontWeight: 600, color: "#fff",
+                  }}
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          )}
+        </AppModal>
       )}
     </div>
   );

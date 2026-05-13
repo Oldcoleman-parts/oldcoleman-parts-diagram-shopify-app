@@ -84,28 +84,44 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (intent === "delete") {
     const id = Number(formData.get("id"));
-    const category = await db.category.findUnique({
-      where: { id },
-      include: {
-        _count: { select: { diagrams: true, children: true } },
-      },
+
+    // Collect all descendant category IDs (BFS)
+    const allCats = await db.category.findMany({ select: { id: true, parentId: true } });
+    const toDelete = new Set([id]);
+    const queue = [id];
+    while (queue.length > 0) {
+      const cur = queue.shift()!;
+      for (const cat of allCats) {
+        if (cat.parentId === cur && !toDelete.has(cat.id)) {
+          toDelete.add(cat.id);
+          queue.push(cat.id);
+        }
+      }
+    }
+    const allIds = Array.from(toDelete);
+
+    // Delete all diagrams linked to any of these categories (cascades DiagramCategory + DiagramProduct)
+    const diagramLinks = await db.diagramCategory.findMany({
+      where: { categoryId: { in: allIds } },
+      select: { diagramId: true },
     });
-    if (!category) return { errors: { general: "Category not found" } };
-    if (category._count.diagrams > 0) {
-      return {
-        errors: {
-          general: `Cannot delete "${category.name}" — it has ${category._count.diagrams} diagram(s). Re-assign or delete them first.`,
-        },
-      };
+    const diagramIds = [...new Set(diagramLinks.map((dc) => dc.diagramId))];
+    if (diagramIds.length > 0) {
+      await db.diagram.deleteMany({ where: { id: { in: diagramIds } } });
     }
-    if (category._count.children > 0) {
-      return {
-        errors: {
-          general: `Cannot delete "${category.name}" — it has subcategories. Delete or re-assign them first.`,
-        },
-      };
+
+    // Delete categories leaf-first to respect FK constraints
+    const parentOf = new Map(allCats.map((c) => [c.id, c.parentId]));
+    let remaining = new Set(allIds);
+    while (remaining.size > 0) {
+      const leaves = Array.from(remaining).filter(
+        (rid) => !Array.from(remaining).some((other) => parentOf.get(other) === rid),
+      );
+      if (leaves.length === 0) break;
+      await db.category.deleteMany({ where: { id: { in: leaves } } });
+      for (const leaf of leaves) remaining.delete(leaf);
     }
-    await db.category.delete({ where: { id } });
+
     return { success: true };
   }
 
@@ -440,7 +456,6 @@ export default function CategoriesPage() {
   const [editCategory, setEditCategory] = useState<CategoryItem | null>(null);
   const [defaultParentId, setDefaultParentId] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<LoadedCategory | null>(null);
-  const [deleteError, setDeleteError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
   const allCategories: CategoryItem[] = categories.map((c) => ({
@@ -492,20 +507,6 @@ export default function CategoriesPage() {
   }
 
   function handleDelete(cat: LoadedCategory) {
-    const hasChildren = (categories as LoadedCategory[]).some(c => c.parentId === cat.id);
-    if (hasChildren) {
-      setDeleteError(`Cannot delete "${cat.name}" — it has subcategories. Delete or re-assign them first.`);
-      setDeleteTarget(cat);
-      return;
-    }
-    if (cat._count.diagrams > 0) {
-      setDeleteError(
-        `Cannot delete "${cat.name}" — it has ${cat._count.diagrams} diagram(s). Re-assign or delete them first.`,
-      );
-      setDeleteTarget(cat);
-      return;
-    }
-    setDeleteError("");
     setDeleteTarget(cat);
   }
 
@@ -606,20 +607,33 @@ export default function CategoriesPage() {
         defaultParentId={defaultParentId}
       />
 
-      {deleteTarget && (
-        <AppModal heading="Delete category" onHide={() => setDeleteTarget(null)}>
-          {(dismiss) => (
-            <>
-              {deleteError ? (
-                <s-banner tone="critical">{deleteError}</s-banner>
-              ) : (
-                <s-text>
-                  Are you sure you want to delete &ldquo;{deleteTarget.name}&rdquo;? This cannot be undone.
-                </s-text>
-              )}
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "20px" }}>
-                <s-button variant="secondary" onClick={dismiss}>Cancel</s-button>
-                {!deleteError && (
+      {deleteTarget && (() => {
+        const hasChildren = (categories as LoadedCategory[]).some(c => c.parentId === deleteTarget.id);
+        const hasDiagrams = deleteTarget._count.diagrams > 0;
+        const warningMessage =
+          hasDiagrams && hasChildren
+            ? `"${deleteTarget.name}" has subcategories and is assigned to ${deleteTarget._count.diagrams} diagram(s). Deleting it will also delete all subcategories and those diagrams. This cannot be undone.`
+            : hasDiagrams
+            ? `"${deleteTarget.name}" is assigned to ${deleteTarget._count.diagrams} diagram(s). Deleting it will also delete all those diagrams. This cannot be undone.`
+            : hasChildren
+            ? `"${deleteTarget.name}" has subcategories. Deleting it will also delete all subcategories. This cannot be undone.`
+            : null;
+
+        return (
+          <AppModal heading="Delete category" onHide={() => setDeleteTarget(null)}>
+            {(dismiss) => (
+              <>
+                {warningMessage ? (
+                  <div>
+                    <s-banner tone="warning">{warningMessage}</s-banner>
+                  </div>
+                ) : (
+                  <p style={{ margin: 0, fontSize: "14px", color: "#202223" }}>
+                    Are you sure you want to delete &ldquo;{deleteTarget.name}&rdquo;? This cannot be undone.
+                  </p>
+                )}
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "20px" }}>
+                  <s-button variant="secondary" onClick={dismiss}>Cancel</s-button>
                   <s-button
                     variant="primary"
                     tone="critical"
@@ -627,12 +641,12 @@ export default function CategoriesPage() {
                   >
                     Delete
                   </s-button>
-                )}
-              </div>
-            </>
-          )}
-        </AppModal>
-      )}
+                </div>
+              </>
+            )}
+          </AppModal>
+        );
+      })()}
     </s-page>
   );
 }

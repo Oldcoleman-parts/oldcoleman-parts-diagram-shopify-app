@@ -67,20 +67,20 @@ export function FileUpload({ label, accept, onComplete, currentUrl }: Props) {
       {/* Image preview with overlay remove button */}
       {isImage && preview && !uploading && (
         <div style={{ position: "relative", display: "inline-block", width: "100%" }}>
-          <div style={{
-            border: "1px solid #e5e7eb",
-            borderRadius: "8px",
-            overflow: "hidden",
-            background: "#f9fafb",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            minHeight: "120px",
-            padding: "12px",
-            cursor: "zoom-in",
-          }}
+          <div
             onClick={() => setLightbox(true)}
-          >
+            style={{
+              border: "1px solid #e5e7eb",
+              borderRadius: "8px",
+              overflow: "hidden",
+              background: "#f9fafb",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              minHeight: "120px",
+              padding: "12px",
+              cursor: "pointer",
+            }}>
             <img
               src={preview}
               alt="Uploaded image"
@@ -93,6 +93,7 @@ export function FileUpload({ label, accept, onComplete, currentUrl }: Props) {
               }}
             />
           </div>
+          {/* Remove button */}
           <button
             type="button"
             onClick={remove}
@@ -120,8 +121,63 @@ export function FileUpload({ label, accept, onComplete, currentUrl }: Props) {
         </div>
       )}
 
-      {/* Drop zone: for PDF always, for images only when no preview */}
-      {(!isImage || !preview || uploading) && (
+      {/* PDF preview card (mirrors image preview style) */}
+      {!isImage && preview && !uploading && (
+        <div style={{ position: "relative", display: "inline-block", width: "100%" }}>
+          <div style={{
+            border: "1px solid #e5e7eb",
+            borderRadius: "8px",
+            background: "#f9fafb",
+            display: "flex",
+            alignItems: "center",
+            gap: "14px",
+            padding: "16px",
+            minHeight: "72px",
+          }}>
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#e3342f" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="9" y1="13" x2="15" y2="13" />
+              <line x1="9" y1="17" x2="13" y2="17" />
+            </svg>
+            <div>
+              <div style={{ fontSize: "13px", fontWeight: 500, color: "#202223", marginBottom: "4px" }}>
+                PDF document uploaded
+              </div>
+              <a href={preview} target="_blank" rel="noreferrer" style={{ fontSize: "12px", color: "#2c6ecb", textDecoration: "none" }}>
+                View document →
+              </a>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={remove}
+            title="Remove file"
+            style={{
+              position: "absolute",
+              top: 8,
+              right: 8,
+              background: "rgba(0,0,0,0.55)",
+              border: "none",
+              borderRadius: "50%",
+              width: 28,
+              height: 28,
+              cursor: "pointer",
+              color: "#fff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 18,
+              lineHeight: 1,
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {/* Drop zone: hidden when a file/image is already uploaded */}
+      {(!preview || uploading) && (
         <s-drop-zone
           label={label}
           accept={accept}
@@ -133,26 +189,12 @@ export function FileUpload({ label, accept, onComplete, currentUrl }: Props) {
               <s-spinner />
               <s-text>Uploading…</s-text>
             </s-stack>
-          ) : preview && !isImage ? (
-            <div style={{ padding: "8px" }}>
-              <s-text>
-                File uploaded —{" "}
-                <s-link href={preview} target="_blank">view</s-link>
-              </s-text>
-            </div>
           ) : (
             <s-text>
               Drop {isImage ? "an image" : "a PDF"} here or click to select
             </s-text>
           )}
         </s-drop-zone>
-      )}
-
-      {/* PDF remove button */}
-      {!isImage && preview && !uploading && (
-        <div style={{ marginTop: 4 }}>
-          <s-button variant="tertiary" onClick={remove}>Remove</s-button>
-        </div>
       )}
 
       {/* Image preview modal */}
