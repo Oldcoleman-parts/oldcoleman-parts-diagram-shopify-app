@@ -113,7 +113,7 @@ function CheckRow({ node, depth, selectedIds, onToggle }: {
                 padding: 0, color: "#9ca3af", display: "flex", lineHeight: 1,
               }}
             >
-              <svg width="10" height="10" viewBox="0 0 20 20" fill="currentColor">
+              <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" clipRule="evenodd" d={expanded
                   ? "M5.293 7.293a1 1 0 0 1 1.414 0L10 10.586l3.293-3.293a1 1 0 1 1 1.414 1.414l-4 4a1 1 0 0 1-1.414 0l-4-4a1 1 0 0 1 0-1.414z"
                   : "M7.293 14.707a1 1 0 0 1 0-1.414L10.586 10 7.293 6.707a1 1 0 0 1 1.414-1.414l4 4a1 1 0 0 1 0 1.414l-4 4a1 1 0 0 1-1.414 0z"
