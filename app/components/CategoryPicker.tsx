@@ -181,7 +181,12 @@ export function CategoryPicker({ allCategories, selectedIds, onChange }: {
     }
   }
 
-  const selectedItems = allCategories.filter((c) => selectedIds.includes(c.id));
+  const ancestorsOfSelected = new Set(
+    selectedIds.flatMap((id) => getAncestorIds(id, allCategories))
+  );
+  const selectedItems = allCategories.filter(
+    (c) => selectedIds.includes(c.id) && !ancestorsOfSelected.has(c.id)
+  );
 
   return (
     <div>
