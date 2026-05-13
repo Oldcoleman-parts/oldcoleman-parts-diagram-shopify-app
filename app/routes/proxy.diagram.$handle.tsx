@@ -203,8 +203,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   .dp-td-desc{padding:11px 6px;vertical-align:middle;overflow:hidden}
   .dp-desc{display:block;color:#111827;line-height:1.35;margin-bottom:3px;font-size:0.82rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .dp-stock{display:inline-flex;align-items:center;gap:3px;font-size:0.7rem;color:#16a34a;font-weight:500}
-  .dp-stock--out{color:#9ca3af}
-  .dp-add-btn--unavail{background:#e5e7eb;color:#9ca3af;cursor:default}
+  .dp-stock--out{color:#dc2626}
+  .dp-add-btn--unavail{background:#f3f4f6;color:#6b7280;cursor:not-allowed;border:1px solid #e5e7eb}
   .dp-td-price{padding:11px 6px;white-space:nowrap;vertical-align:middle;overflow:hidden}
   .dp-price{font-weight:700;color:#111827;font-size:0.88rem}
   .dp-price-na{color:#9ca3af}

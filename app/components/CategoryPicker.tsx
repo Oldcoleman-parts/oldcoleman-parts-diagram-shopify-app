@@ -77,18 +77,20 @@ function CheckRow({ node, depth, selectedIds, onToggle }: {
   selectedIds: number[];
   onToggle: (id: number) => void;
 }) {
-  const hasChildren = node.children.length > 0;
+  const isLeaf = node.children.length === 0;
   const isSelected = selectedIds.includes(node.id);
-  // Auto-expand if any descendant is selected so user can see why parent is checked
   const [expanded, setExpanded] = useState(
-    () => hasChildren && hasDescendantSelected(node, selectedIds),
+    () => !isLeaf && hasDescendantSelected(node, selectedIds),
   );
   const [hov, setHov] = useState(false);
 
   return (
     <>
       <div
-        onClick={() => onToggle(node.id)}
+        onClick={() => {
+          if (isLeaf) onToggle(node.id);
+          else setExpanded((x) => !x);
+        }}
         onMouseEnter={() => setHov(true)}
         onMouseLeave={() => setHov(false)}
         style={{
@@ -97,14 +99,14 @@ function CheckRow({ node, depth, selectedIds, onToggle }: {
           gap: "6px",
           padding: `4px 8px 4px ${8 + depth * 18}px`,
           borderRadius: "5px",
-          cursor: "pointer",
-          background: isSelected ? "#f0faf7" : hov ? "#f9fafb" : "transparent",
+          cursor: isLeaf ? "pointer" : "default",
+          background: isLeaf && isSelected ? "#f0faf7" : isLeaf && hov ? "#f9fafb" : "transparent",
           userSelect: "none",
         }}
       >
-        {/* Chevron spacer */}
+        {/* Chevron / spacer */}
         <div style={{ width: 14, height: 14, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          {hasChildren && (
+          {!isLeaf && (
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); setExpanded((x) => !x); }}
@@ -123,35 +125,36 @@ function CheckRow({ node, depth, selectedIds, onToggle }: {
           )}
         </div>
 
-        {/* Checkbox */}
-        <input
-          type="checkbox"
-          checked={isSelected}
-          onChange={() => onToggle(node.id)}
-          onClick={(e) => e.stopPropagation()}
-          style={{ cursor: "pointer", width: 14, height: 14, accentColor: "#008060", flexShrink: 0 }}
-        />
+        {/* Checkbox — leaf nodes only */}
+        {isLeaf && (
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => onToggle(node.id)}
+            onClick={(e) => e.stopPropagation()}
+            style={{ cursor: "pointer", width: 14, height: 14, accentColor: "#008060", flexShrink: 0 }}
+          />
+        )}
+
+        {/* Spacer to align leaf names with parent names when no checkbox */}
+        {!isLeaf && (
+          <div style={{ width: 14, flexShrink: 0 }} />
+        )}
 
         <FolderIcon depth={depth} />
 
         <span style={{
           fontSize: "13px",
-          color: isSelected ? "#006e52" : "#374151",
-          fontWeight: isSelected ? 500 : 400,
+          color: isLeaf && isSelected ? "#006e52" : "#374151",
+          fontWeight: isLeaf && isSelected ? 500 : 400,
           lineHeight: "1.4",
           flex: 1,
         }}>
           {node.name}
         </span>
-
-        {hasChildren && !isSelected && (
-          <span style={{ fontSize: "10px", color: "#c4ccd5", flexShrink: 0 }}>
-            {node.children.length}
-          </span>
-        )}
       </div>
 
-      {hasChildren && expanded && node.children.map((child) => (
+      {!isLeaf && expanded && node.children.map((child) => (
         <CheckRow
           key={child.id}
           node={child}
@@ -175,9 +178,7 @@ export function CategoryPicker({ allCategories, selectedIds, onChange }: {
     if (selectedIds.includes(id)) {
       onChange(selectedIds.filter((x) => x !== id));
     } else {
-      // Also select all ancestors so parent categories appear checked
-      const ancestors = getAncestorIds(id, allCategories);
-      onChange([...new Set([...selectedIds, id, ...ancestors])]);
+      onChange([...selectedIds, id]);
     }
   }
 

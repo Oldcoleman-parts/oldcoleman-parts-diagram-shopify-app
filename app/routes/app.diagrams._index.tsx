@@ -425,7 +425,10 @@ export default function DiagramsPage() {
                 × Clear filter
               </button>
             )}
-            {selected.length > 0 && (
+          </div>
+
+          {selected.length > 0 && (
+            <div>
               <s-button
                 variant="secondary"
                 tone="critical"
@@ -433,8 +436,8 @@ export default function DiagramsPage() {
               >
                 Delete selected ({selected.length})
               </s-button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         <div style={{ marginTop: "20px" }}>
