@@ -672,7 +672,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
               if (btn) {
                 btn.disabled = true;
                 btn.classList.add('dp-add-btn--unavail');
-                btn.innerHTML = 'Add';
+                btn.innerHTML = ${icoCart} 'Add';
                 btn.removeAttribute('data-variant-id');
               }
             }
