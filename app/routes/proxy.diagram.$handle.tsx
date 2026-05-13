@@ -204,14 +204,14 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   .dp-desc{display:block;color:#111827;line-height:1.35;margin-bottom:3px;font-size:0.82rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .dp-stock{display:inline-flex;align-items:center;gap:3px;font-size:0.7rem;color:#16a34a;font-weight:500}
   .dp-stock--out{color:#dc2626}
-  .dp-add-btn--unavail{background:#f3f4f6;color:#6b7280;cursor:not-allowed;border:1px solid #e5e7eb}
+
   .dp-td-price{padding:11px 6px;white-space:nowrap;vertical-align:middle;overflow:hidden}
   .dp-price{font-weight:700;color:#111827;font-size:0.88rem}
   .dp-price-na{color:#9ca3af}
   .dp-td-action{padding:9px 10px 9px 4px;white-space:nowrap;vertical-align:middle;overflow:hidden}
   .dp-add-btn{display:inline-flex;align-items:center;gap:5px;background:#dc2626;color:#fff;border:none;border-radius:6px;padding:6px 10px;font-size:0.78rem;font-weight:600;cursor:pointer;transition:background 0.12s;vertical-align:middle;white-space:nowrap}
   .dp-add-btn:hover{background:#b91c1c}
-  .dp-add-btn:disabled{opacity:0.6;cursor:default}
+  .dp-add-btn:disabled{opacity:0.45;cursor:not-allowed;pointer-events:none}
   .dp-chevbtn{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border:1px solid #e2e0da;border-radius:5px;color:#6b7280;text-decoration:none;vertical-align:middle;margin-left:4px;transition:background 0.1s;flex-shrink:0}
   .dp-chevbtn:hover{background:#f3f2ef;color:#1a1a1a}
 
@@ -671,8 +671,6 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
               var btn = row.querySelector('.dp-add-btn');
               if (btn) {
                 btn.disabled = true;
-                btn.classList.add('dp-add-btn--unavail');
-                btn.innerHTML = ${icoCart} 'Add';
                 btn.removeAttribute('data-variant-id');
               }
             }
